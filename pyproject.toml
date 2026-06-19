@@ -1,0 +1,70 @@
+[project]
+name = "crosslingual-tts-lab"
+version = "0.1.0"
+description = "Benchmark harness for voice-language disentanglement in multilingual TTS."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+dependencies = []
+
+
+[project.optional-dependencies]
+open-data = [
+  "datasets[audio]>=4.0,<5.0",
+  "pandas>=2.2.3; python_version >= '3.12'",
+]
+metrics = [
+  "faster-whisper>=1.1,<2.0",
+  "speechbrain>=1.0,<2.0",
+  "nvidia-cublas-cu12>=12,<13; sys_platform == 'linux'",
+  "torch>=2.11,<2.12",
+  "torchaudio>=2.11,<2.12",
+]
+tts = [
+  "TTS>=0.22,<0.23; python_version < '3.12'",
+  "torch>=2.11,<2.12; python_version < '3.12'",
+  "torchaudio>=2.11,<2.12; python_version < '3.12'",
+]
+f5 = [
+  "f5-tts>=1.1.20,<2.0; python_version < '3.13'",
+]
+qwen = [
+  "qwen-tts>=0.1.0",
+]
+real = [
+  "datasets[audio]>=4.0,<5.0",
+  "pandas>=2.2.3; python_version >= '3.12'",
+  "faster-whisper>=1.1,<2.0",
+  "speechbrain>=1.0,<2.0",
+  "nvidia-cublas-cu12>=12,<13; sys_platform == 'linux'",
+  "TTS>=0.22,<0.23; python_version < '3.12'",
+  "f5-tts>=1.1.20,<2.0; python_version < '3.13'",
+  "qwen-tts>=0.1.0; python_version >= '3.12'",
+  "torch>=2.11,<2.12",
+  "torchaudio>=2.11,<2.12",
+]
+
+
+[project.scripts]
+crosslingual-tts-lab = "crosslingual_tts_lab.cli:main"
+xttslab = "crosslingual_tts_lab.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+package = true
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cu130", marker = "sys_platform == 'linux'" },
+]
+torchaudio = [
+  { index = "pytorch-cu130", marker = "sys_platform == 'linux'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
