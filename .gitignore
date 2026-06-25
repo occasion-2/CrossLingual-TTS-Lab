@@ -8,6 +8,10 @@ dist/
 build/
 *.egg-info/
 uv.lock
-configs/
+configs/*
+!configs/mini.toml
+!configs/models_real.template.toml
 runs/
 .env
+.agents
+.codex

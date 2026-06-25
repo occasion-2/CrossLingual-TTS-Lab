@@ -7,7 +7,6 @@ license = { file = "LICENSE" }
 requires-python = ">=3.11"
 dependencies = []
 
-
 [project.optional-dependencies]
 open-data = [
   "datasets[audio]>=4.0,<5.0",
@@ -29,6 +28,7 @@ f5 = [
   "f5-tts>=1.1.20,<2.0; python_version < '3.13'",
 ]
 qwen = [
+  "flash-attn>=2.8,<3.0; sys_platform == 'linux' and python_version < '3.13'",
   "qwen-tts>=0.1.0",
 ]
 real = [
@@ -39,11 +39,11 @@ real = [
   "nvidia-cublas-cu12>=12,<13; sys_platform == 'linux'",
   "TTS>=0.22,<0.23; python_version < '3.12'",
   "f5-tts>=1.1.20,<2.0; python_version < '3.13'",
-  "qwen-tts>=0.1.0; python_version >= '3.12'",
+  "flash-attn>=2.8,<3.0; sys_platform == 'linux' and python_version < '3.13'",
+  "qwen-tts>=0.1.0",
   "torch>=2.11,<2.12",
   "torchaudio>=2.11,<2.12",
 ]
-
 
 [project.scripts]
 crosslingual-tts-lab = "crosslingual_tts_lab.cli:main"
@@ -63,8 +63,14 @@ torch = [
 torchaudio = [
   { index = "pytorch-cu130", marker = "sys_platform == 'linux'" },
 ]
+flash-attn = [
+  { url = "https://github.com/alkemiik-coder/FlashAttention-2.8.3-Custom-Linux-Wheels/releases/download/FA.2.8.3-custom-linux-wheels-x86_64/flash_attn-2.8.3+cu130torch2.11cxx11abiTRUEfullsm80sm90sm100sm120nvcc132-cp311-cp311-linux_x86_64.whl", marker = "sys_platform == 'linux' and python_version == '3.11'" }
+]
 
 [[tool.uv.index]]
 name = "pytorch-cu130"
 url = "https://download.pytorch.org/whl/cu130"
 explicit = true
+
+[tool.uv.extra-build-dependencies]
+flash-attn = ["torch"]

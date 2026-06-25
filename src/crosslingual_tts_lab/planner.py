@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import hashlib
+import re
 from dataclasses import dataclass
 
 from crosslingual_tts_lab.config import BenchmarkConfig, ModelSpec, TargetSpec, VoiceSpec
+
+
+_JOB_ID_UNSAFE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
 @dataclass(frozen=True)
@@ -32,10 +37,26 @@ def plan_jobs(config: BenchmarkConfig) -> list[GenerationJob]:
             target = targets[pair.target]
             jobs.append(
                 GenerationJob(
-                    id=f"{model.id}__{voice.id}__{target.id}",
+                    id="__".join(
+                        [
+                            _job_id_component(model.id),
+                            _job_id_component(voice.id),
+                            _job_id_component(target.id),
+                        ]
+                    ),
                     model=model,
                     voice=voice,
                     target=target,
                 )
             )
     return jobs
+
+
+def _job_id_component(value: str) -> str:
+    cleaned = _JOB_ID_UNSAFE.sub("_", value).strip("._-")
+    if not cleaned:
+        cleaned = "item"
+    if cleaned == value:
+        return cleaned
+    digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:8]
+    return f"{cleaned}_{digest}"

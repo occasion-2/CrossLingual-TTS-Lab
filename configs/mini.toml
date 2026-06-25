@@ -1,0 +1,52 @@
+name = "mini-ru-crosslingual"
+description = "Tiny smoke-test benchmark for RU prompt voices across EN/ZH targets."
+
+[[models]]
+id = "dummy_tts"
+backend = "dummy"
+
+[[voices]]
+id = "ru_ref_001"
+language = "ru"
+speaker_id = "cv-ru-demo-001"
+audio_path = "data/reference/ru_ref_001.wav"
+transcript = "eto korotkaya russkaya referensnaya fraza"
+emotion = "neutral"
+
+[[voices]]
+id = "en_ref_001"
+language = "en"
+speaker_id = "cv-en-demo-001"
+audio_path = "data/reference/en_ref_001.wav"
+transcript = "this is a short english reference phrase"
+emotion = "neutral"
+
+[[targets]]
+id = "en_weather"
+language = "en"
+text = "The weather changed quickly, but the speaker stayed calm."
+emotion = "neutral"
+
+[[targets]]
+id = "zh_station"
+language = "zh"
+text = "今天晚上火车站会非常安静。"
+emotion = "neutral"
+
+[[targets]]
+id = "ru_notice"
+language = "ru"
+text = "Пожалуйста, проверьте расписание перед поездкой."
+emotion = "neutral"
+
+[[pairs]]
+voice = "ru_ref_001"
+target = "en_weather"
+
+[[pairs]]
+voice = "ru_ref_001"
+target = "zh_station"
+
+[[pairs]]
+voice = "en_ref_001"
+target = "ru_notice"

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Protocol
 
 from crosslingual_tts_lab.backends import create_backend
+from crosslingual_tts_lab.backends.base import TTSBackend
 from crosslingual_tts_lab.config import BenchmarkConfig
 from crosslingual_tts_lab.device import detect_device_profile
 from crosslingual_tts_lab.metrics import MetricResult, create_metrics
@@ -16,34 +18,7 @@ from crosslingual_tts_lab.runner_types import GeneratedSample
 def run_benchmark(config: BenchmarkConfig, out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     audio_dir = out_dir / "audio"
-    device_profile = detect_device_profile()
-    metrics = create_metrics(config.metrics, device_profile)
-    jobs = plan_jobs(config)
-
-    samples: list[GeneratedSample] = []
-    metric_results: dict[str, list[MetricResult]] = {}
-
-    backend_cache = {}
-    for job in jobs:
-        backend_key = (job.model.backend, json.dumps(job.model.params, sort_keys=True))
-        backend = backend_cache.setdefault(
-            backend_key,
-            create_backend(job.model.backend, job.model.params),
-        )
-        result = backend.synthesize(job, audio_dir)
-        sample = GeneratedSample(
-            job=job,
-            audio_path=result.audio_path,
-            synthesis_metadata=result.metadata,
-        )
-        samples.append(sample)
-        metric_results[job.id] = [metric.evaluate(sample) for metric in metrics]
-
-    manifest = _build_manifest(config, jobs, samples, metric_results, device_profile.to_dict())
-    manifest_path = out_dir / "manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
-    write_reports(manifest_path)
-    return manifest_path
+    return _execute_benchmark(config, out_dir, SynthesizingSampleSource(audio_dir))
 
 
 def score_existing_run(config: BenchmarkConfig, out_dir: Path) -> Path:
@@ -52,6 +27,59 @@ def score_existing_run(config: BenchmarkConfig, out_dir: Path) -> Path:
         raise FileNotFoundError(f"missing run audio directory: {audio_dir}")
 
     existing_metadata = _load_existing_synthesis_metadata(out_dir / "manifest.json")
+    return _execute_benchmark(
+        config,
+        out_dir,
+        ExistingRunSampleSource(audio_dir, existing_metadata),
+    )
+
+
+class SampleSource(Protocol):
+    def sample_for(self, job: GenerationJob) -> GeneratedSample:
+        """Return a generated sample for a planned job."""
+
+
+@dataclass
+class SynthesizingSampleSource:
+    audio_dir: Path
+    backend_cache: dict[tuple[str, str], TTSBackend] = field(default_factory=dict)
+
+    def sample_for(self, job: GenerationJob) -> GeneratedSample:
+        result = self._backend_for(job).synthesize(job, self.audio_dir)
+        return GeneratedSample(
+            job=job,
+            audio_path=result.audio_path,
+            synthesis_metadata=result.metadata,
+        )
+
+    def _backend_for(self, job: GenerationJob) -> TTSBackend:
+        backend_key = _backend_cache_key(job)
+        if backend_key not in self.backend_cache:
+            self.backend_cache[backend_key] = create_backend(job.model.backend, job.model.params)
+        return self.backend_cache[backend_key]
+
+
+@dataclass(frozen=True)
+class ExistingRunSampleSource:
+    audio_dir: Path
+    metadata_by_job_id: dict[str, dict]
+
+    def sample_for(self, job: GenerationJob) -> GeneratedSample:
+        audio_path = self.audio_dir / f"{job.id}.wav"
+        if not audio_path.exists():
+            raise FileNotFoundError(f"missing generated audio for {job.id}: {audio_path}")
+        return GeneratedSample(
+            job=job,
+            audio_path=audio_path,
+            synthesis_metadata=self.metadata_by_job_id.get(job.id, {}),
+        )
+
+
+def _execute_benchmark(
+    config: BenchmarkConfig,
+    out_dir: Path,
+    sample_source: SampleSource,
+) -> Path:
     device_profile = detect_device_profile()
     metrics = create_metrics(config.metrics, device_profile)
     jobs = plan_jobs(config)
@@ -59,18 +87,19 @@ def score_existing_run(config: BenchmarkConfig, out_dir: Path) -> Path:
     samples: list[GeneratedSample] = []
     metric_results: dict[str, list[MetricResult]] = {}
     for job in jobs:
-        audio_path = audio_dir / f"{job.id}.wav"
-        if not audio_path.exists():
-            raise FileNotFoundError(f"missing generated audio for {job.id}: {audio_path}")
-        sample = GeneratedSample(
-            job=job,
-            audio_path=audio_path,
-            synthesis_metadata=existing_metadata.get(job.id, {}),
-        )
+        sample = sample_source.sample_for(job)
         samples.append(sample)
         metric_results[job.id] = [metric.evaluate(sample) for metric in metrics]
 
     manifest = _build_manifest(config, jobs, samples, metric_results, device_profile.to_dict())
+    return _write_manifest(out_dir, manifest)
+
+
+def _backend_cache_key(job: GenerationJob) -> tuple[str, str]:
+    return (job.model.backend, json.dumps(job.model.params, sort_keys=True))
+
+
+def _write_manifest(out_dir: Path, manifest: dict) -> Path:
     manifest_path = out_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     write_reports(manifest_path)

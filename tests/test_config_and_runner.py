@@ -7,9 +7,19 @@ import unittest
 from pathlib import Path
 
 from crosslingual_tts_lab.backends import create_backend
+from crosslingual_tts_lab.backends.coqui_xtts import CoquiXTTSBackend
 from crosslingual_tts_lab.backends.external import ExternalCommandBackend
 from crosslingual_tts_lab.config import load_config
-from crosslingual_tts_lab.config import ModelSpec, TargetSpec, VoiceSpec
+from crosslingual_tts_lab.config import (
+    BenchmarkConfig,
+    MetricSpec,
+    ModelSpec,
+    PairSpec,
+    TargetSpec,
+    VoiceSpec,
+)
+from crosslingual_tts_lab.device import DeviceProfile
+from crosslingual_tts_lab.metrics import create_metrics
 from crosslingual_tts_lab.open_datasets import (
     _fleurs_dataset_code,
     _normalize_text,
@@ -30,6 +40,30 @@ class ConfigAndRunnerTests(unittest.TestCase):
         self.assertEqual(len(jobs), 3)
         self.assertEqual({job.direction for job in jobs}, {"ru->en", "ru->zh", "en->ru"})
         self.assertTrue(all(job.is_cross_lingual for job in jobs))
+
+    def test_plan_jobs_sanitizes_path_unsafe_model_ids(self) -> None:
+        config = BenchmarkConfig(
+            name="unsafe-id-smoke",
+            description=None,
+            models=[ModelSpec(id="Qwen/Qwen3-TTS-12Hz-1.7B-Base", backend="qwen_tts")],
+            voices=[
+                VoiceSpec(
+                    id="voice",
+                    language="ru",
+                    speaker_id="speaker",
+                    audio_path=Path("/tmp/reference.wav"),
+                )
+            ],
+            targets=[TargetSpec(id="target", language="en", text="hello")],
+            pairs=[PairSpec(voice="voice", target="target")],
+            metrics=[],
+            root=Path("."),
+        )
+
+        job = plan_jobs(config)[0]
+
+        self.assertNotIn("/", job.id)
+        self.assertTrue(job.id.startswith("Qwen_Qwen3-TTS-12Hz-1.7B-Base_"))
 
     def test_run_benchmark_writes_manifest_report_and_audio(self) -> None:
         config = load_config(Path("configs/mini.toml"))
@@ -60,6 +94,17 @@ class ConfigAndRunnerTests(unittest.TestCase):
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(manifest["summary"]["jobs"], 3)
             self.assertTrue(manifest_path.with_name("report.md").exists())
+            self.assertEqual(
+                {sample["synthesis_metadata"]["backend"] for sample in manifest["samples"]},
+                {"dummy"},
+            )
+            self.assertEqual(
+                {
+                    sample["synthesis_metadata"]["synthetic_placeholder"]
+                    for sample in manifest["samples"]
+                },
+                {True},
+            )
 
     def test_parse_dataset_language_requests(self) -> None:
         requests = parse_language_requests("ru:ru,en:en,zh-CN:zh")
@@ -148,6 +193,36 @@ class ConfigAndRunnerTests(unittest.TestCase):
 
         self.assertEqual(config.models[0].params["model"], "F5TTS_v1_Base")
 
+    def test_config_rejects_qwen_backend_with_f5_model_param(self) -> None:
+        text = render_benchmark_toml(
+            name="bad-qwen-config",
+            description="backend/model mismatch",
+            models=[
+                {
+                    "id": "qwen",
+                    "backend": "qwen_tts",
+                    "params": {"model": "F5TTS_v1_Base"},
+                }
+            ],
+            metrics=[],
+            voices=[
+                {
+                    "id": "v",
+                    "language": "ru",
+                    "speaker_id": "speaker",
+                    "audio_path": "/tmp/ref.wav",
+                }
+            ],
+            targets=[{"id": "t", "language": "en", "text": "hello"}],
+            pairs=[{"voice": "v", "target": "t"}],
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bad_qwen.toml"
+            path.write_text(text, encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "backend 'qwen_tts'.*F5TTS_v1_Base"):
+                load_config(path)
+
     def test_real_model_template_loads(self) -> None:
         config = load_config(Path("configs/models_real.template.toml"))
 
@@ -162,6 +237,28 @@ class ConfigAndRunnerTests(unittest.TestCase):
         self.assertEqual(create_backend("qwen_tts").name, "qwen_tts")
         self.assertEqual(create_backend("qwentts").name, "qwen_tts")
         self.assertIsInstance(create_backend("external_command"), ExternalCommandBackend)
+
+    def test_backend_registry_resolves_aliases(self) -> None:
+        self.assertIsInstance(create_backend("xtts"), CoquiXTTSBackend)
+        self.assertEqual(create_backend("f5").name, "f5_tts")
+        self.assertEqual(create_backend("qwen3_tts").name, "qwen_tts")
+        self.assertIsInstance(create_backend("cli"), ExternalCommandBackend)
+
+    def test_metric_registry_expands_configured_metrics(self) -> None:
+        profile = DeviceProfile(device="cpu", cuda_available=False)
+
+        metrics = create_metrics(
+            [
+                MetricSpec(id="asr", backend="faster_whisper_asr"),
+                MetricSpec(id="lid", backend="faster_whisper_lid"),
+                MetricSpec(id="placeholders", backend="placeholder"),
+            ],
+            profile,
+        )
+
+        self.assertEqual(metrics[0].name, "asr")
+        self.assertEqual(metrics[1].name, "lid")
+        self.assertIn("source_language_leakage_proxy", {metric.name for metric in metrics})
 
     def test_external_command_backend_creates_expected_audio(self) -> None:
         backend = ExternalCommandBackend(
@@ -253,6 +350,44 @@ class ConfigAndRunnerTests(unittest.TestCase):
                     language="English",
                     ref_audio=str(ref_path),
                     ref_text="privet",
+                    x_vector_only_mode=False,
+                )
+
+    def test_qwen_tts_backend_uses_x_vector_mode_without_reference_text(self) -> None:
+        from unittest.mock import MagicMock, patch
+        import numpy as np
+        from crosslingual_tts_lab.backends.qwen_tts import QwenTTSBackend
+
+        backend = QwenTTSBackend({"ref_text_mode": "empty"})
+        mock_model = MagicMock()
+        mock_model.generate_voice_clone.return_value = (np.zeros(16000), 16000)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ref_path = Path(tmp) / "reference.wav"
+            ref_path.write_bytes(b"mock audio")
+            job = GenerationJob(
+                id="qwen_empty_ref_text",
+                model=ModelSpec(id="qwen", backend="qwen_tts"),
+                voice=VoiceSpec(
+                    id="voice",
+                    language="ru",
+                    speaker_id="speaker",
+                    audio_path=ref_path,
+                    transcript="privet",
+                ),
+                target=TargetSpec(id="target", language="en", text="hello"),
+            )
+
+            with patch.object(backend, "_load_model", return_value=mock_model):
+                result = backend.synthesize(job, Path(tmp))
+
+                self.assertTrue(result.audio_path.exists())
+                mock_model.generate_voice_clone.assert_called_once_with(
+                    text="hello",
+                    language="English",
+                    ref_audio=str(ref_path),
+                    ref_text="",
+                    x_vector_only_mode=True,
                 )
 
 

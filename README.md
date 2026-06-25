@@ -18,15 +18,39 @@ same interfaces.
 
 ## Quick Start
 
+From this source checkout, use `xttslab.py`. It loads the package from `src/`
+directly, so you do not need to install the package just to smoke-test the
+pipeline.
+
 ```bash
-uv run xttslab.py init configs/my-mini.toml
-uv run xttslab.py run --config configs/mini.toml --out runs/mini
-uv run xttslab.py report --run runs/mini
+uv run python xttslab.py plan --config configs/mini.toml
+uv run python xttslab.py run --config configs/mini.toml --out runs/mini
+uv run python xttslab.py report --run runs/mini
 ```
 
 The default config uses the built-in `dummy` backend. It writes deterministic
 WAV files and metric placeholders, which makes the whole pipeline testable before
 large model dependencies are installed.
+
+The run creates:
+
+- `runs/mini/audio/*.wav` for generated audio
+- `runs/mini/manifest.json` for machine-readable sample and metric records
+- `runs/mini/report.md` for a readable summary
+
+If synthesis succeeded and only metrics need to be recomputed, reuse the WAV
+files instead of regenerating audio:
+
+```bash
+uv run python xttslab.py score --config configs/mini.toml --run runs/mini
+```
+
+To start a new editable config:
+
+```bash
+uv run python xttslab.py init configs/my-mini.toml
+uv run python xttslab.py plan --config configs/my-mini.toml
+```
 
 In a normal writable Python environment you can also install the package and use
 the shorter console script:
@@ -35,24 +59,43 @@ the shorter console script:
 uv run xttslab plan --config configs/mini.toml
 ```
 
+In restricted environments where `uv` cannot write to its default cache under
+your home directory, point the cache at a writable directory:
+
+```bash
+UV_CACHE_DIR=/tmp/uv-cache uv run python xttslab.py plan --config configs/mini.toml
+```
+
 ## Open Dataset Path
 
 For a real open-data slice on Hugging Face, generate a config from Google
-FLEURS:
+FLEURS. For Qwen-TTS, keep the benchmark id short and put the Hugging Face model
+repo in `--model-param model=...`:
 
 ```bash
-uv run xttslab.py dataset fleurs \
+uv run python xttslab.py dataset fleurs \
   --languages ru:ru,en:en,zh-CN:zh \
-  --voices-per-language 2 \
-  --targets-per-language 4 \
+  --voices-per-language 4 \
+  --targets-per-language 8 \
   --target-languages en,zh \
   --max-voice-chars 120 \
   --max-target-chars 110 \
-  --model-id f5tts_v1_base \
-  --model-backend f5_tts \
-  --model-param model=F5TTS_v1_Base \
+  --model-id qwen3_tts_1_7b_base \
+  --model-backend qwen_tts \
+  --model-param model=Qwen/Qwen3-TTS-12Hz-1.7B-Base \
   --model-param ref_text_mode=empty \
   --out configs/fleurs_ru_en_zh.toml
+```
+
+Do not combine `--model-backend qwen_tts` with
+`--model-param model=F5TTS_v1_Base`: that asks the Qwen backend to download an
+F5 model as if it were a Qwen Hugging Face repo.
+
+If the Qwen stack prints `sox: command not found`, install the system SoX
+binary before running synthesis. On Debian/Ubuntu:
+
+```bash
+sudo apt-get install sox libsox-fmt-all
 ```
 
 Use `dataset_code:benchmark_code` for languages when the dataset code differs
@@ -71,11 +114,28 @@ usable for English/Mandarin targets, while Russian references can still be used
 as voice prompts. The FLEURS generator also removes spaces between Mandarin
 characters before writing the config.
 
+The equivalent F5 command uses the F5 backend and F5 model parameter:
+
+```bash
+uv run python xttslab.py dataset fleurs \
+  --languages ru:ru,en:en,zh-CN:zh \
+  --voices-per-language 2 \
+  --targets-per-language 4 \
+  --target-languages en,zh \
+  --max-voice-chars 120 \
+  --max-target-chars 110 \
+  --model-id f5tts_v1_base \
+  --model-backend f5_tts \
+  --model-param model=F5TTS_v1_Base \
+  --model-param ref_text_mode=empty \
+  --out configs/fleurs_ru_en_zh_f5.toml
+```
+
 Then inspect and run:
 
 ```bash
-uv run xttslab.py plan --config configs/fleurs_ru_en_zh.toml
-uv run xttslab.py run \
+uv run python xttslab.py plan --config configs/fleurs_ru_en_zh.toml
+uv run python xttslab.py run \
   --config configs/fleurs_ru_en_zh.toml \
   --out runs/fleurs_ru_en_zh
 ```
@@ -91,7 +151,7 @@ The generated config uses open-source metric adapters:
 Check what the runner sees:
 
 ```bash
-uv run xttslab.py doctor
+uv run python xttslab.py doctor
 ```
 
 On CUDA-enabled cards (such as 12GB-class GPUs), the default execution uses float16 and a
@@ -140,7 +200,7 @@ also use the 3.11 `.venv`:
 
 ```bash
 UV_CACHE_DIR=/tmp/uv-cache uv run python -c "import sys, f5_tts; print(sys.version); print('f5 ok')"
-UV_CACHE_DIR=/tmp/uv-cache uv run xttslab.py run \
+UV_CACHE_DIR=/tmp/uv-cache uv run python xttslab.py run \
   --config configs/fleurs_ru_en_zh.toml \
   --out runs/fleurs_ru_en_zh
 ```
@@ -149,7 +209,7 @@ If synthesis succeeded but metrics failed, reuse the generated WAVs and rescore
 without rerunning TTS:
 
 ```bash
-UV_CACHE_DIR=/tmp/uv-cache uv run xttslab.py score \
+UV_CACHE_DIR=/tmp/uv-cache uv run python xttslab.py score \
   --config configs/fleurs_ru_en_zh.toml \
   --run runs/fleurs_ru_en_zh
 ```
@@ -199,6 +259,31 @@ The command backend supports placeholders such as `{audio_path}`,
 `{source_language}`, and `{target_language}`. Use it for models that are easier
 to run from their own CLI or a separate environment.
 
+Backend names are resolved through aliases, so these are equivalent where
+appropriate: `coqui_xtts`, `xtts`, `xtts_v2`; `f5_tts`, `f5`, `f5tts`;
+`qwen_tts`, `qwen`, `qwentts`, `qwen3_tts`; and `external_command`, `command`,
+`cli`.
+
+Metric backends are configured in `[[metrics]]` blocks. Omit the section to use
+the deterministic placeholder metrics, or set real adapters explicitly:
+
+```toml
+[[metrics]]
+id = "asr_error"
+backend = "faster_whisper_asr"
+params = { vad_filter = true }
+
+[[metrics]]
+id = "target_language_id"
+backend = "faster_whisper_lid"
+params = { vad_filter = true }
+
+[[metrics]]
+id = "speaker_similarity"
+backend = "speechbrain_speaker_similarity"
+params = {}
+```
+
 ## What The Report Tracks
 
 - target-language intelligibility through ASR WER/CER when configured
@@ -225,11 +310,17 @@ src/crosslingual_tts_lab/
   runner.py           # generation + metric execution
   report.py           # JSON/Markdown report writer
   audio.py            # tiny deterministic WAV helper for dummy backend
+  cuda_libs.py        # cuBLAS/CTranslate2 helper for CUDA metrics execution
+  device.py           # device detection and profile generator (CPU vs GPU)
+  open_datasets.py    # config builder for open datasets (FLEURS, Common Voice)
+  runner_types.py     # common dataclasses used across runner and metrics
+  text_metrics.py     # calculation of WER and CER error metrics
   backends/           # TTS backend interface and implementations
   metrics/            # metric interface and baseline placeholder metrics
 configs/
   mini.toml           # example benchmark
 tests/
+  test_config_and_runner.py  # test suite for config, dataset, and runner logic
 ```
 
 ## Config Shape

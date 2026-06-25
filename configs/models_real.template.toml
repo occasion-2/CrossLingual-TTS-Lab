@@ -1,0 +1,58 @@
+name = "real-model-template"
+description = "Template with nondummy TTS model backends. Replace voice paths with open-data references."
+
+[[models]]
+id = "xtts_v2"
+backend = "coqui_xtts"
+params = { model_name = "tts_models/multilingual/multi-dataset/xtts_v2" }
+
+[[models]]
+id = "f5tts_v1_base"
+backend = "f5_tts"
+params = { model = "F5TTS_v1_Base", ref_text_mode = "transcript", nfe_step = 32, cfg_strength = 2.0 }
+
+[[models]]
+id = "qwentts_12hz_0.6b_base"
+backend = "qwen_tts"
+params = { model = "Qwen/Qwen3-TTS-12Hz-0.6B-Base", ref_text_mode = "transcript", dtype = "bfloat16" }
+
+[[models]]
+id = "qwentts_12hz_1.7b_base"
+backend = "qwen_tts"
+params = { model = "Qwen/Qwen3-TTS-12Hz-1.7B-Base", ref_text_mode = "transcript", dtype = "bfloat16" }
+
+[[models]]
+id = "f5tts_cli"
+backend = "external_command"
+params = { command = ["f5-tts_infer-cli", "--model", "F5TTS_v1_Base", "--ref_audio", "{voice_audio_path}", "--ref_text", "{voice_transcript}", "--gen_text", "{target_text}", "--output_dir", "{output_dir}"], expected_output = "{output_dir}/infer_cli_basic.wav", timeout_s = 1800 }
+
+[[metrics]]
+id = "asr_error"
+backend = "faster_whisper_asr"
+params = { vad_filter = true }
+
+[[metrics]]
+id = "target_language_id"
+backend = "faster_whisper_lid"
+params = { vad_filter = true }
+
+[[metrics]]
+id = "speaker_similarity"
+backend = "speechbrain_speaker_similarity"
+params = {}
+
+[[voices]]
+id = "replace_ru_voice"
+language = "ru"
+speaker_id = "replace_me"
+audio_path = "/absolute/path/to/reference.wav"
+transcript = "replace with the reference transcript"
+
+[[targets]]
+id = "replace_en_target"
+language = "en"
+text = "Replace with target text."
+
+[[pairs]]
+voice = "replace_ru_voice"
+target = "replace_en_target"

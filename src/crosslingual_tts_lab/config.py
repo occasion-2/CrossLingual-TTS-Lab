@@ -128,6 +128,8 @@ def validate_config(config: BenchmarkConfig) -> None:
     _ensure_unique("voices", [voice.id for voice in config.voices])
     _ensure_unique("targets", [target.id for target in config.targets])
     _ensure_unique("metrics", [metric.id for metric in config.metrics])
+    for model in config.models:
+        _validate_model_params(model)
 
     voice_ids = {voice.id for voice in config.voices}
     target_ids = {target.id for target in config.targets}
@@ -136,6 +138,39 @@ def validate_config(config: BenchmarkConfig) -> None:
             raise ValueError(f"pair references unknown voice {pair.voice!r}")
         if pair.target not in target_ids:
             raise ValueError(f"pair references unknown target {pair.target!r}")
+
+
+def _validate_model_params(model: ModelSpec) -> None:
+    backend = _canonical_backend(model.backend)
+    model_name = str(model.params.get("model") or model.params.get("model_name") or "")
+    normalized_model = model_name.casefold()
+    if backend == "qwen_tts" and "f5tts" in normalized_model:
+        raise ValueError(
+            f"model {model.id!r} uses backend 'qwen_tts' but params.model points at "
+            f"{model_name!r}. Use a Qwen model such as "
+            "'Qwen/Qwen3-TTS-12Hz-1.7B-Base', or switch backend to 'f5_tts'."
+        )
+    if backend == "f5_tts" and normalized_model.startswith("qwen/"):
+        raise ValueError(
+            f"model {model.id!r} uses backend 'f5_tts' but params.model points at "
+            f"{model_name!r}. Use backend 'qwen_tts' for Qwen models."
+        )
+
+
+def _canonical_backend(name: str) -> str:
+    normalized = name.strip().lower()
+    aliases = {
+        "xtts": "coqui_xtts",
+        "xtts_v2": "coqui_xtts",
+        "f5": "f5_tts",
+        "f5tts": "f5_tts",
+        "qwen": "qwen_tts",
+        "qwentts": "qwen_tts",
+        "qwen3_tts": "qwen_tts",
+        "command": "external_command",
+        "cli": "external_command",
+    }
+    return aliases.get(normalized, normalized)
 
 
 def _load_mapping(path: Path) -> dict[str, Any]:

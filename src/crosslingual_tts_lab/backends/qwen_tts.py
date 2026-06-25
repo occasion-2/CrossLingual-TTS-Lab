@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import wave
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -27,15 +28,15 @@ class QwenTTSBackend:
         model = self._load_model()
         language = _map_language(job.target.language)
         ref_text = self._reference_text(job)
+        x_vector_only_mode = self._x_vector_only_mode(ref_text)
 
         wavs, sr = model.generate_voice_clone(
             text=job.target.text,
             language=language,
             ref_audio=str(job.voice.audio_path),
             ref_text=ref_text,
+            x_vector_only_mode=x_vector_only_mode,
         )
-
-        import soundfile as sf
 
         if isinstance(wavs, (list, tuple)):
             wav_data = wavs[0]
@@ -45,7 +46,7 @@ class QwenTTSBackend:
         if hasattr(wav_data, "cpu"):
             wav_data = wav_data.cpu().numpy()
 
-        sf.write(str(audio_path), wav_data, sr)
+        _write_wav(audio_path, wav_data, int(sr))
 
         return SynthesisResult(
             audio_path=audio_path,
@@ -54,6 +55,7 @@ class QwenTTSBackend:
                 "model_name": self._model_name(),
                 "reference_audio_path": str(job.voice.audio_path),
                 "ref_text_mode": self.params.get("ref_text_mode", "transcript"),
+                "x_vector_only_mode": x_vector_only_mode,
                 "target_language": job.target.language,
                 "mapped_language": language,
                 "device": self._device(),
@@ -96,6 +98,11 @@ class QwenTTSBackend:
             return str(self.params.get("ref_text", ""))
         return job.voice.transcript or ""
 
+    def _x_vector_only_mode(self, ref_text: str) -> bool:
+        if "x_vector_only_mode" in self.params:
+            return bool(self.params["x_vector_only_mode"])
+        return not bool(ref_text)
+
     def _model_name(self) -> str:
         return str(self.params.get("model") or self.params.get("model_name") or "Qwen/Qwen3-TTS-12Hz-1.7B-Base")
 
@@ -124,3 +131,29 @@ def _map_language(lang_code: str) -> str:
     }
     normalized = lang_code.strip().lower()
     return mapping.get(normalized, mapping.get(normalized.split("-")[0], "English"))
+
+
+def _write_wav(path: Path, wav_data: Any, sample_rate: int) -> None:
+    try:
+        import soundfile as sf
+    except ModuleNotFoundError:
+        _write_wav_stdlib(path, wav_data, sample_rate)
+        return
+
+    sf.write(str(path), wav_data, sample_rate)
+
+
+def _write_wav_stdlib(path: Path, wav_data: Any, sample_rate: int) -> None:
+    if hasattr(wav_data, "tolist"):
+        wav_data = wav_data.tolist()
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(sample_rate)
+        frames = bytearray()
+        for sample in wav_data:
+            if isinstance(sample, (list, tuple)):
+                sample = sample[0] if sample else 0.0
+            value = max(-1.0, min(1.0, float(sample)))
+            frames.extend(int(value * 32767).to_bytes(2, "little", signed=True))
+        handle.writeframes(bytes(frames))
