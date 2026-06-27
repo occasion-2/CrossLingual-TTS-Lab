@@ -65,6 +65,10 @@ class QwenTTSBackend:
 
     def _load_model(self) -> Any:
         if self._model is None:
+            import logging
+            import warnings
+            logging.getLogger("transformers.generation.utils").setLevel(logging.ERROR)
+            warnings.filterwarnings("ignore", message=".*pad_token_id.*")
             try:
                 from qwen_tts import Qwen3TTSModel
             except ModuleNotFoundError as exc:

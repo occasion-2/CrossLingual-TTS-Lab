@@ -5,6 +5,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Protocol
 
+from tqdm import tqdm
+
 from crosslingual_tts_lab.backends import create_backend
 from crosslingual_tts_lab.backends.base import TTSBackend
 from crosslingual_tts_lab.config import BenchmarkConfig
@@ -100,7 +102,7 @@ def _execute_benchmark(
 
     samples: list[GeneratedSample] = []
     metric_results: dict[str, list[MetricResult]] = {}
-    for job in jobs:
+    for job in tqdm(jobs, desc="Running benchmark"):
         sample = sample_source.sample_for(job)
         samples.append(sample)
         if sample.synthesis_metadata.get("synthetic_placeholder", False):
@@ -115,6 +117,17 @@ def _execute_benchmark(
             ]
         else:
             metric_results[job.id] = [metric.evaluate(sample) for metric in metrics]
+
+        import gc
+        gc.collect()
+        import sys
+        if "torch" in sys.modules:
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
 
     manifest = _build_manifest(config, jobs, samples, metric_results, device_profile.to_dict())
     return _write_manifest(out_dir, manifest)

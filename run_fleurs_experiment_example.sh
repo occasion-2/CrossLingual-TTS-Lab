@@ -9,6 +9,7 @@ set -e
 
 export COQUI_TOS_AGREED=1
 export UV_CACHE_DIR="$PWD/.uv-cache"
+export UV_VENV_CLEAR=1
 
 echo "Generating configs for each model to avoid GPU OOM..."
 
