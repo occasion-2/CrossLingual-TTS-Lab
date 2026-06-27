@@ -15,3 +15,8 @@ runs/
 .env
 .agents
 .codex
+overnight_runs/
+CosyVoice/
+Spark-TTS/
+.uv-cache/
+pretrained_models/

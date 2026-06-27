@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Benchmark harness for voice-language disentanglement in multilingual TTS."
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.12"
 dependencies = []
 
 [project.optional-dependencies]
@@ -23,6 +23,8 @@ tts = [
   "TTS>=0.22,<0.23; python_version < '3.12'",
   "torch>=2.11,<2.12; python_version < '3.12'",
   "torchaudio>=2.11,<2.12; python_version < '3.12'",
+  "numpy<2; python_version < '3.12'",
+  "transformers<4.45.0; python_version < '3.12'",
 ]
 f5 = [
   "f5-tts>=1.1.20,<2.0; python_version < '3.13'",
@@ -31,18 +33,63 @@ qwen = [
   "flash-attn>=2.8,<3.0; sys_platform == 'linux' and python_version < '3.13'",
   "qwen-tts>=0.1.0",
 ]
-real = [
-  "datasets[audio]>=4.0,<5.0",
-  "pandas>=2.2.3; python_version >= '3.12'",
-  "faster-whisper>=1.1,<2.0",
-  "speechbrain>=1.0,<2.0",
-  "nvidia-cublas-cu12>=12,<13; sys_platform == 'linux'",
-  "TTS>=0.22,<0.23; python_version < '3.12'",
-  "f5-tts>=1.1.20,<2.0; python_version < '3.13'",
-  "flash-attn>=2.8,<3.0; sys_platform == 'linux' and python_version < '3.13'",
-  "qwen-tts>=0.1.0",
+cosyvoice = [
+  "conformer==0.3.2",
+  "deepspeed==0.15.1; sys_platform == 'linux'",
+  "diffusers==0.29.0",
+  "fastapi==0.115.6",
+  "fastapi-cli==0.0.4",
+  "gdown==5.1.0",
+  "gradio>=5.4.0,<6.0.0",
+  "grpcio==1.57.0",
+  "grpcio-tools==1.57.0",
+  "hydra-core==1.3.2",
+  "HyperPyYAML==1.2.3",
+  "inflect==7.3.1",
+  "librosa==0.10.2",
+  "lightning==2.2.4",
+  "matplotlib==3.7.5",
+  "modelscope==1.20.0",
+  "networkx==3.1",
+  "numpy>=1.26.4,<2.0.0",
+  "omegaconf==2.3.0",
+  "onnx==1.16.0",
+  "onnxruntime-gpu==1.18.0; sys_platform == 'linux'",
+  "onnxruntime==1.18.0; sys_platform == 'darwin' or sys_platform == 'win32'",
+  "openai-whisper==20231117",
+  "protobuf==4.25",
+  "pyarrow==18.1.0",
+  "pydantic==2.7.0",
+  "pyworld==0.3.4",
+  "rich==13.7.1",
+  "soundfile==0.12.1",
+  "tensorboard==2.14.0",
+  "tensorrt-cu12==10.13.3.9; sys_platform == 'linux'",
+  "tensorrt-cu12-bindings==10.13.3.9; sys_platform == 'linux'",
+  "tensorrt-cu12-libs==10.13.3.9; sys_platform == 'linux'",
   "torch>=2.11,<2.12",
   "torchaudio>=2.11,<2.12",
+  "transformers>=4.46.2,<4.52.0",
+  "x-transformers==2.11.24",
+  "uvicorn==0.30.0",
+  "wetext==0.0.4",
+  "wget==3.2",
+  "setuptools<70",
+]
+spark-tts = [
+  "einops==0.8.1",
+  "einx==0.3.0",
+  "numpy>=1.26.4,<2.0.0",
+  "omegaconf==2.3.0",
+  "packaging==24.2",
+  "safetensors==0.5.2",
+  "soundfile==0.12.1",
+  "soxr==0.5.0.post1",
+  "torch>=2.11,<2.12",
+  "torchaudio>=2.11,<2.12",
+  "tqdm==4.66.5",
+  "transformers>=4.46.2,<4.52.0",
+  "gradio>=5.4.0,<6.0.0",
 ]
 
 [project.scripts]
@@ -55,6 +102,20 @@ build-backend = "hatchling.build"
 
 [tool.uv]
 package = true
+constraint-dependencies = ["setuptools<70"]
+conflicts = [
+  [ { extra = "tts" }, { extra = "cosyvoice" } ],
+  [ { extra = "tts" }, { extra = "spark-tts" } ],
+  [ { extra = "tts" }, { extra = "qwen" } ],
+  [ { extra = "tts" }, { extra = "f5" } ],
+  [ { extra = "f5" }, { extra = "cosyvoice" } ],
+  [ { extra = "f5" }, { extra = "spark-tts" } ],
+  [ { extra = "f5" }, { extra = "qwen" } ],
+  [ { extra = "qwen" }, { extra = "cosyvoice" } ],
+  [ { extra = "qwen" }, { extra = "spark-tts" } ],
+  [ { extra = "cosyvoice" }, { extra = "spark-tts" } ],
+]
+
 
 [tool.uv.sources]
 torch = [
@@ -66,11 +127,54 @@ torchaudio = [
 flash-attn = [
   { url = "https://github.com/alkemiik-coder/FlashAttention-2.8.3-Custom-Linux-Wheels/releases/download/FA.2.8.3-custom-linux-wheels-x86_64/flash_attn-2.8.3+cu130torch2.11cxx11abiTRUEfullsm80sm90sm100sm120nvcc132-cp311-cp311-linux_x86_64.whl", marker = "sys_platform == 'linux' and python_version == '3.11'" }
 ]
+onnxruntime-gpu = [
+  { index = "onnxruntime-cuda-12", marker = "sys_platform == 'linux'" }
+]
 
 [[tool.uv.index]]
 name = "pytorch-cu130"
 url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
+[[tool.uv.index]]
+name = "onnxruntime-cuda-12"
+url = "https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/"
+explicit = true
+
 [tool.uv.extra-build-dependencies]
 flash-attn = ["torch"]
+deepspeed = ["wheel", "setuptools<70"]
+openai-whisper = ["setuptools<70"]
+
+
+
+
+
+
+
+[[tool.uv.dependency-metadata]]
+name = "tensorrt-cu12"
+requires-dist = ["tensorrt-cu12-bindings", "tensorrt-cu12-libs"]
+
+[[tool.uv.dependency-metadata]]
+name = "tensorrt-cu12-bindings"
+requires-dist = []
+
+[[tool.uv.dependency-metadata]]
+name = "tensorrt-cu12-libs"
+requires-dist = []
+
+[[tool.uv.dependency-metadata]]
+name = "openai-whisper"
+requires-dist = [
+  "numba",
+  "numpy",
+  "torch",
+  "tqdm",
+  "more-itertools",
+  "tiktoken",
+]
+
+
+
+

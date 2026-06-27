@@ -46,15 +46,27 @@ class CoquiXTTSBackend:
         if self._tts is None:
             try:
                 from TTS.api import TTS
+                import torch
             except ModuleNotFoundError as exc:
                 raise RuntimeError(
                     "Coqui XTTS backend requires the optional 'TTS' package. "
-                    "Install the tts/real extra before using backend='coqui_xtts'."
+                    "Make sure it is installed in the current environment."
                 ) from exc
 
-            profile = detect_device_profile()
-            gpu = bool(self.params.get("gpu", profile.device == "cuda"))
-            self._tts = TTS(self._model_name(), gpu=gpu)
+            gpu = self.params.get("gpu", detect_device_profile().device == "cuda")
+
+            # PyTorch 2.6 workaround for Coqui TTS UnpicklingError
+            original_load = torch.load
+            def _unsafe_load(*args, **kwargs):
+                kwargs['weights_only'] = False
+                return original_load(*args, **kwargs)
+
+            try:
+                torch.load = _unsafe_load
+                self._tts = TTS(self._model_name(), gpu=gpu)
+            finally:
+                torch.load = original_load
+
         return self._tts
 
     def _model_name(self) -> str:

@@ -43,8 +43,22 @@ class SampleSource(Protocol):
 class SynthesizingSampleSource:
     audio_dir: Path
     backend_cache: dict[tuple[str, str], TTSBackend] = field(default_factory=dict)
+    existing_metadata: dict[str, dict] = field(default_factory=dict, init=False)
+
+    def __post_init__(self):
+        manifest_path = self.audio_dir.parent / "manifest.json"
+        self.existing_metadata = _load_existing_synthesis_metadata(manifest_path)
 
     def sample_for(self, job: GenerationJob) -> GeneratedSample:
+        audio_path = self.audio_dir / f"{job.id}.wav"
+        if audio_path.exists() and audio_path.stat().st_size > 1000 and job.id in self.existing_metadata:
+            metadata = self.existing_metadata[job.id]
+            return GeneratedSample(
+                job=job,
+                audio_path=audio_path,
+                synthesis_metadata=metadata,
+            )
+
         result = self._backend_for(job).synthesize(job, self.audio_dir)
         return GeneratedSample(
             job=job,

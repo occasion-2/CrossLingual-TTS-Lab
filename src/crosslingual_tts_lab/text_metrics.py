@@ -22,10 +22,94 @@ def char_error_rate(reference: str, hypothesis: str) -> float:
     return _edit_distance(ref_chars, hyp_chars) / len(ref_chars)
 
 
+class ASRTextAdapter:
+    def normalize(self, text: str) -> str:
+        raise NotImplementedError
+
+
+class DefaultASRAdapter(ASRTextAdapter):
+    """Fallback adapter: lowercase, strip basic punctuation, and normalize whitespace."""
+    def normalize(self, text: str) -> str:
+        if not text:
+            return ""
+        text = text.lower()
+        # Remove standard punctuation and symbols, keeping only alphanumeric and whitespace
+        text = re.sub(r"[^\w\s]", "", text, flags=re.UNICODE)
+        return " ".join(text.split())
+
+
+class EnglishASRAdapter(ASRTextAdapter):
+    """English ASR adapter: lowercase, remove punctuation except apostrophes, normalize whitespace."""
+    def normalize(self, text: str) -> str:
+        if not text:
+            return ""
+        text = text.lower()
+        # Keep letters, numbers, spaces, and apostrophes
+        text = re.sub(r"[^\w\s']", "", text, flags=re.UNICODE)
+        return " ".join(text.split())
+
+
+class RussianASRAdapter(ASRTextAdapter):
+    """Russian ASR adapter: lowercase, replace ё with е, remove punctuation, normalize whitespace."""
+    def normalize(self, text: str) -> str:
+        if not text:
+            return ""
+        text = text.lower()
+        text = text.replace("ё", "е")
+        text = re.sub(r"[^\w\s]", "", text, flags=re.UNICODE)
+        return " ".join(text.split())
+
+
+class ChineseASRAdapter(ASRTextAdapter):
+    """Chinese ASR adapter: lowercase, remove all spaces, remove all punctuation."""
+    def normalize(self, text: str) -> str:
+        if not text:
+            return ""
+        text = text.lower()
+        # Remove all spaces and punctuation
+        text = re.sub(r"[^\w]", "", text, flags=re.UNICODE)
+        text = text.replace("_", "")
+        return text
+
+
+class JapaneseASRAdapter(ChineseASRAdapter):
+    pass
+
+
+class KoreanASRAdapter(ASRTextAdapter):
+    """Korean ASR adapter: lowercase, keep spaces, remove punctuation."""
+    def normalize(self, text: str) -> str:
+        if not text:
+            return ""
+        text = text.lower()
+        text = re.sub(r"[^\w\s]", "", text, flags=re.UNICODE)
+        return " ".join(text.split())
+
+
+_ASR_ADAPTER_REGISTRY: dict[str, ASRTextAdapter] = {
+    "en": EnglishASRAdapter(),
+    "ru": RussianASRAdapter(),
+    "zh": ChineseASRAdapter(),
+    "cmn": ChineseASRAdapter(),
+    "ja": JapaneseASRAdapter(),
+    "ko": KoreanASRAdapter(),
+}
+
+
+def get_asr_adapter(language: str) -> ASRTextAdapter:
+    lang_key = language.lower().replace("_", "-").split("-")[0]
+    return _ASR_ADAPTER_REGISTRY.get(lang_key, DefaultASRAdapter())
+
+
 def choose_error_rate(language: str, reference: str, hypothesis: str) -> tuple[str, float]:
-    if language.lower() in {"zh", "ja", "ko"}:
-        return "cer", char_error_rate(reference, hypothesis)
-    return "wer", word_error_rate(reference, hypothesis)
+    adapter = get_asr_adapter(language)
+    norm_ref = adapter.normalize(reference)
+    norm_hyp = adapter.normalize(hypothesis)
+
+    lang_key = language.lower().replace("_", "-").split("-")[0]
+    if lang_key in {"zh", "cmn", "ja", "ko"}:
+        return "cer", char_error_rate(norm_ref, norm_hyp)
+    return "wer", word_error_rate(norm_ref, norm_hyp)
 
 
 def _word_tokens(text: str) -> list[str]:

@@ -390,6 +390,115 @@ class ConfigAndRunnerTests(unittest.TestCase):
                     x_vector_only_mode=True,
                 )
 
+    def test_cosyvoice_backend_synthesizes_using_mock(self) -> None:
+        import sys
+        from unittest.mock import MagicMock, patch
+        import numpy as np
+
+        # Create mock module structure for cosyvoice
+        mock_file_utils = MagicMock()
+        mock_file_utils.load_wav.return_value = np.zeros(16000)
+        sys.modules["cosyvoice"] = MagicMock()
+        sys.modules["cosyvoice.utils"] = MagicMock()
+        sys.modules["cosyvoice.utils.file_utils"] = mock_file_utils
+
+        try:
+            from crosslingual_tts_lab.backends.cosyvoice import CosyVoiceBackend
+
+            backend = CosyVoiceBackend()
+            mock_model = MagicMock()
+            mock_model.inference_zero_shot.return_value = [{"tts_speech": np.zeros(16000)}]
+
+            with tempfile.TemporaryDirectory() as tmp:
+                ref_path = Path(tmp) / "reference.wav"
+                ref_path.write_bytes(b"mock audio")
+
+                job = GenerationJob(
+                    id="cosyvoice_smoke",
+                    model=ModelSpec(id="cosy", backend="cosyvoice"),
+                    voice=VoiceSpec(
+                        id="voice",
+                        language="ru",
+                        speaker_id="speaker",
+                        audio_path=ref_path,
+                        transcript="privet",
+                    ),
+                    target=TargetSpec(id="target", language="en", text="hello"),
+                )
+
+                with patch.object(backend, "_load_model", return_value=mock_model):
+                    result = backend.synthesize(job, Path(tmp))
+
+                    self.assertTrue(result.audio_path.exists())
+                    mock_model.inference_zero_shot.assert_called_once()
+        finally:
+            sys.modules.pop("cosyvoice", None)
+            sys.modules.pop("cosyvoice.utils", None)
+            sys.modules.pop("cosyvoice.utils.file_utils", None)
+
+    def test_spark_tts_backend_synthesizes_using_mock(self) -> None:
+        from unittest.mock import MagicMock, patch
+        import numpy as np
+        from crosslingual_tts_lab.backends.spark_tts import SparkTTSBackend
+
+        backend = SparkTTSBackend()
+        mock_model = MagicMock()
+        mock_model.inference.return_value = np.zeros(16000)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ref_path = Path(tmp) / "reference.wav"
+            ref_path.write_bytes(b"mock audio")
+
+            job = GenerationJob(
+                id="spark_smoke",
+                model=ModelSpec(id="spark", backend="spark_tts"),
+                voice=VoiceSpec(
+                    id="voice",
+                    language="ru",
+                    speaker_id="speaker",
+                    audio_path=ref_path,
+                    transcript="privet",
+                ),
+                target=TargetSpec(id="target", language="en", text="hello"),
+            )
+
+            with patch.object(backend, "_load_model", return_value=mock_model):
+                result = backend.synthesize(job, Path(tmp))
+
+                self.assertTrue(result.audio_path.exists())
+                mock_model.inference.assert_called_once_with(
+                    text="hello",
+                    prompt_speech_path=str(ref_path),
+                    prompt_text="privet",
+                    gender=None,
+                    pitch=None,
+                    speed=None,
+                    seed=None,
+                )
+
+    def test_asr_adapters_normalize_correctly(self) -> None:
+        from crosslingual_tts_lab.text_metrics import get_asr_adapter
+
+        # English
+        en_adapter = get_asr_adapter("en-US")
+        self.assertEqual(en_adapter.normalize("Hello, World! It's nice."), "hello world it's nice")
+
+        # Russian
+        ru_adapter = get_asr_adapter("ru_RU")
+        self.assertEqual(ru_adapter.normalize("Привет, Мир! Всё хорошо."), "привет мир все хорошо")
+
+        # Chinese
+        zh_adapter = get_asr_adapter("zh-CN")
+        self.assertEqual(zh_adapter.normalize("亚马逊河 也是 地球 上！"), "亚马逊河也是地球上")
+
+        # Chinese/Mandarin with cmn prefix (FLEURS)
+        cmn_adapter = get_asr_adapter("cmn_hans_cn")
+        self.assertEqual(cmn_adapter.normalize("报告警告 称，"), "报告警告称")
+
+        # Default fallback
+        default_adapter = get_asr_adapter("unknown_lang")
+        self.assertEqual(default_adapter.normalize("Hello, World!"), "hello world")
+
 
 if __name__ == "__main__":
     unittest.main()
