@@ -332,7 +332,10 @@ voice = "ru_ref_001"
 target = "en_weather"
 ```
 
-## Benchmark Results on Google FLEURS
+## Benchmark Results on Google FLEURS (Pending Validation)
+
+> [!IMPORTANT]
+> **Status: Pending Final Validation.** The metrics listed below are preliminary figures. Final verified scientific outputs will be published once the full benchmark runs complete and their provenance manifests/reproducible runs are linked.
 
 The ASR evaluation uses target-language specific text-normalization adapters (preprocessors) to clean reference and hypothesis transcriptions (handling lowercase, removing punctuation, and stripping spaces for CJK characters) before computing WER/CER. 
 

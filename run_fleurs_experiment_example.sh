@@ -21,6 +21,7 @@ models["cosyvoice"]="cosyvoice cosyvoice model_name=FunAudioLLM/Fun-CosyVoice3-0
 models["spark_tts"]="spark_tts spark_tts model_name=pretrained_models/Spark-TTS-0.5B ref_text_mode=empty"
 
 mkdir -p overnight_runs
+failed_runs=()
 
 for key in "${!models[@]}"; do
     IFS=' ' read -r id backend params <<< "${models[$key]}"
@@ -85,9 +86,23 @@ for key in "${!models[@]}"; do
       --out "overnight_runs/config_${key}.toml"
 
     echo "Running benchmark for $key..."
-    LD_LIBRARY_PATH="$NVIDIA_LIBS:$LD_LIBRARY_PATH" "$VENV_DIR/bin/xttslab" run \
+    if ! LD_LIBRARY_PATH="$NVIDIA_LIBS:$LD_LIBRARY_PATH" "$VENV_DIR/bin/xttslab" run \
       --config "overnight_runs/config_${key}.toml" \
-      --out "overnight_runs/results_${key}" || echo "Warning: Run for $key failed or was interrupted."
+      --out "overnight_runs/results_${key}"; then
+        echo "Error: Benchmark run for $key failed."
+        failed_runs+=("$key")
+    fi
 done
+
+if [ ${#failed_runs[@]} -ne 0 ]; then
+    echo "----------------------------------------------------------"
+    echo "ERROR: The following benchmark runs failed:"
+    for failed in "${failed_runs[@]}"; do
+        echo "  - $failed"
+    done
+    echo "Check the logs above for details."
+    echo "----------------------------------------------------------"
+    exit 1
+fi
 
 echo "Overnight benchmark runs completed. Check overnight_runs/ directory for manifests and reports."

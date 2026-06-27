@@ -32,41 +32,45 @@ if ! command -v git &> /dev/null; then
     exit 1
 fi
 
-# Clone CosyVoice if missing
-if [ ! -d "CosyVoice" ]; then
-    echo "Cloning CosyVoice repository..."
-    git clone https://github.com/FunASR/CosyVoice.git
-else
-    echo "CosyVoice repository already present."
-fi
-
-# Always ensure third-party submodules are initialized
-echo "Ensuring CosyVoice submodules are initialized..."
-cd CosyVoice
-git submodule update --init --recursive
-cd ..
-
-# Clone Spark-TTS if missing
-if [ ! -d "Spark-TTS" ]; then
-    echo "Cloning Spark-TTS repository..."
-    git clone https://github.com/SparkAudio/Spark-TTS.git
-else
-    echo "Spark-TTS repository already present."
-fi
-
-# Download Spark-TTS pretrained weights
-if [ ! -d "pretrained_models/Spark-TTS-0.5B" ]; then
-    echo "Downloading Spark-TTS 0.5B model weights from Hugging Face..."
-    mkdir -p pretrained_models
-    
-    if command -v uv &> /dev/null; then
-        uv run --with huggingface_hub huggingface-cli download SparkAudio/Spark-TTS-0.5B --local-dir pretrained_models/Spark-TTS-0.5B
+# Clone CosyVoice if missing and requested
+if [ "$INSTALL_COSY" = true ] || { [ "$INSTALL_COSY" = false ] && [ "$INSTALL_SPARK" = false ]; }; then
+    if [ ! -d "CosyVoice" ]; then
+        echo "Cloning CosyVoice repository..."
+        git clone https://github.com/FunASR/CosyVoice.git
     else
-        pip install huggingface_hub
-        huggingface-cli download SparkAudio/Spark-TTS-0.5B --local-dir pretrained_models/Spark-TTS-0.5B
+        echo "CosyVoice repository already present."
     fi
-else
-    echo "Spark-TTS model weights already downloaded."
+
+    # Always ensure third-party submodules are initialized
+    echo "Ensuring CosyVoice submodules are initialized..."
+    cd CosyVoice
+    git submodule update --init --recursive
+    cd ..
+fi
+
+# Clone Spark-TTS if missing and requested
+if [ "$INSTALL_SPARK" = true ] || { [ "$INSTALL_COSY" = false ] && [ "$INSTALL_SPARK" = false ]; }; then
+    if [ ! -d "Spark-TTS" ]; then
+        echo "Cloning Spark-TTS repository..."
+        git clone https://github.com/SparkAudio/Spark-TTS.git
+    else
+        echo "Spark-TTS repository already present."
+    fi
+
+    # Download Spark-TTS pretrained weights
+    if [ ! -d "pretrained_models/Spark-TTS-0.5B" ]; then
+        echo "Downloading Spark-TTS 0.5B model weights from Hugging Face..."
+        mkdir -p pretrained_models
+        
+        if command -v uv &> /dev/null; then
+            uv run --with huggingface_hub huggingface-cli download SparkAudio/Spark-TTS-0.5B --local-dir pretrained_models/Spark-TTS-0.5B
+        else
+            pip install huggingface_hub
+            huggingface-cli download SparkAudio/Spark-TTS-0.5B --local-dir pretrained_models/Spark-TTS-0.5B
+        fi
+    else
+        echo "Spark-TTS model weights already downloaded."
+    fi
 fi
 
 # Install Python dependencies if requested

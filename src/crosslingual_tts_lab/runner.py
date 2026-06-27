@@ -103,7 +103,18 @@ def _execute_benchmark(
     for job in jobs:
         sample = sample_source.sample_for(job)
         samples.append(sample)
-        metric_results[job.id] = [metric.evaluate(sample) for metric in metrics]
+        if sample.synthesis_metadata.get("synthetic_placeholder", False):
+            metric_results[job.id] = [
+                MetricResult(
+                    name=metric.name,
+                    status="missing_backend",
+                    value=None,
+                    details={"reason": "synthetic placeholder due to unsupported synthesis language"},
+                )
+                for metric in metrics
+            ]
+        else:
+            metric_results[job.id] = [metric.evaluate(sample) for metric in metrics]
 
     manifest = _build_manifest(config, jobs, samples, metric_results, device_profile.to_dict())
     return _write_manifest(out_dir, manifest)

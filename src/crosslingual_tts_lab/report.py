@@ -19,6 +19,10 @@ def render_markdown_report(manifest: dict) -> str:
     
     has_placeholders = False
     for sample in manifest.get("samples", []):
+        metadata = sample.get("synthesis_metadata", {})
+        if metadata.get("synthetic_placeholder", False):
+            has_placeholders = True
+            break
         for metric in sample.get("metrics", []):
             if metric.get("status") == "missing_backend" or "proxy" in metric.get("name", ""):
                 has_placeholders = True
