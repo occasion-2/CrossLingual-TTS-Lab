@@ -95,11 +95,11 @@ if [ "$INSTALL_COSY" = true ]; then
     if command -v uv &> /dev/null; then
         echo "Using uv to install..."
         uv pip install "setuptools<70" wheel
-        uv pip install -e ".[open-data,metrics,cosyvoice]" --no-build-isolation-package openai-whisper --no-build-isolation-package deepspeed
+        uv pip install -r CosyVoice/requirements.txt -e ".[open-data,metrics,cosyvoice]" --no-build-isolation-package openai-whisper --no-build-isolation-package deepspeed
     else
         echo "Using pip to install..."
         pip install "setuptools<70" wheel
-        pip install -e ".[open-data,metrics,cosyvoice]" --no-build-isolation-package openai-whisper --no-build-isolation-package deepspeed
+        pip install -r CosyVoice/requirements.txt -e ".[open-data,metrics,cosyvoice]" --no-build-isolation-package openai-whisper --no-build-isolation-package deepspeed
     fi
 fi
 
@@ -116,10 +116,10 @@ if [ "$INSTALL_SPARK" = true ]; then
     
     if command -v uv &> /dev/null; then
         echo "Using uv to install..."
-        uv pip install -e ".[open-data,metrics,spark-tts]"
+        uv pip install -r Spark-TTS/requirements.txt -e ".[open-data,metrics,spark-tts]"
     else
         echo "Using pip to install..."
-        pip install -e ".[open-data,metrics,spark-tts]"
+        pip install -r Spark-TTS/requirements.txt -e ".[open-data,metrics,spark-tts]"
     fi
 fi
 
