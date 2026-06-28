@@ -8,12 +8,7 @@ Core question:
 > the model preserve speaker identity without leaking source-language accent,
 > phonetics, or prosody into the target language?
 
-The first implementation is intentionally lightweight: it gives you a working
-`uv` project, a config-driven run planner, a dummy synthesis backend for smoke
-tests, pluggable model/metric interfaces, and machine-readable plus Markdown
-reports. Heavy integrations such as F5-TTS, CosyVoice, XTTS, speaker embedding
-models, ASR, LID, SER, and source-language leakage probes can be added behind the
-same interfaces.
+The harness started as a lightweight `uv` project with a config-driven run planner, a dummy synthesis backend, pluggable model/metric interfaces, and machine-readable plus Markdown reports. It now includes several real TTS backends and metric adapters, while source-language leakage probes and SER-based emotion preservation metrics remain future extensions.
 
 ## Quick Start
 
@@ -183,7 +178,7 @@ To evaluate multiple model backends cleanly without PyTorch/CUDA dependency pois
     This will clone the `CosyVoice` and `Spark-TTS` repositories locally and download the 2GB Spark-TTS pre-trained weights.
 
 3. **Install Python dependencies for specific backends**:
-   All model backend dependencies are cleanly separated into optional-dependencies (extras) inside [pyproject.toml](file:///srv/code/Pet/vleak_inspect/pyproject.toml). You can install the dependencies of your choice directly into your active virtual environment:
+   All model backend dependencies are cleanly separated into optional-dependencies (extras) inside [pyproject.toml](pyproject.toml). You can install the dependencies of your choice directly into your active virtual environment:
 
    * **Using the Helper Script** (checks for `uv` or `pip` automatically):
      - For CosyVoice: `./install_dependencies.sh --cosyvoice`
@@ -331,6 +326,18 @@ voice = "ru_ref_001"
 target = "en_weather"
 ```
 
+## Reproducibility Snapshot
+
+- **Dataset**: Google FLEURS
+- **Config**: `configs/fleurs_tiny_all.toml`
+- **Languages**: English, Russian, Mandarin Chinese
+- **Jobs per full direction**: 100
+- **ASR/LID backend**: faster-whisper (medium/small depending on VRAM)
+- **Speaker similarity**: SpeechBrain ECAPA-TDNN (`speechbrain/spkrec-ecapa-voxceleb`)
+- **Confidence intervals**: 95% bootstrap (1000 resamples)
+- **Hardware**: CUDA-enabled GPUs (e.g., 12GB+ VRAM class)
+- **Random seed**: System-default pseudo-random sampling during subset generation
+
 ## Benchmark Results on Google FLEURS
 
 The ASR evaluation uses target-language specific text-normalization adapters (preprocessors) to clean reference and hypothesis transcriptions (handling lowercase, removing punctuation, and stripping spaces for CJK characters) before computing WER/CER. 
@@ -339,7 +346,7 @@ The benchmark harness is being evaluated on a cross-lingual subset of the Google
 
 Below is the comparative summary of the cross-lingual generalization capabilities of the installed models.
 
-*Note: Lower ASR error indicates better intelligibility and pronunciation in the target language. Higher Target LID indicates the model successfully transitioned to the target language. Higher Speaker Sim indicates the target-language voice effectively cloned the source speaker's identity.*
+*Note: Lower ASR error indicates better target-text intelligibility under the chosen ASR and normalization pipeline. Higher Target LID indicates the model successfully transitioned to the target language. Higher Speaker Sim indicates the target-language voice effectively cloned the source speaker's identity.*
 
 ### Table 1: Common Target-Language Subset
 *Only `en` and `zh` target conditions. Excludes target-Russian directions to avoid unsupported/degraded model conditions. F5-TTS target-Russian results are reported in Table 4 for transparency but excluded from this table because the base F5 model is not expected to handle Russian target synthesis reliably.*
@@ -476,7 +483,7 @@ Speaker similarity currently requires calibration against ground-truth positive/
    - **Spark-TTS** (`SparkTTSBackend` / `spark_tts`): Zero-shot cloning through the `SparkTTS` python API.
    *(Note: Because these cutting-edge models have deeply conflicting CUDA and PyTorch dependencies, they cannot coexist in a single environment. The `./run_fleurs_experiment_example.sh` script automatically constructs perfectly isolated virtual environments for each model to safely run them without dependency crashes).*
 2. **ASR adapters per target language** to compute WER/CER:
-   - English, Russian, and Chinese (`zh`/`cmn`) specific normalizers in [text_metrics.py](file:///srv/code/Pet/vleak_inspect/src/crosslingual_tts_lab/text_metrics.py).
+   - English, Russian, and Chinese (`zh`/`cmn`) specific normalizers in [text_metrics.py](src/crosslingual_tts_lab/text_metrics.py).
 
 ## Next Integrations
 
