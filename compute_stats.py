@@ -57,7 +57,7 @@ for key, name in models.items():
                 lid_val = m["value"]
             elif m["name"] == "speaker_similarity" and m["value"] is not None:
                 sim_val = m["value"]
-            elif m["name"] == "source_language_similarity" and m["value"] is not None:
+            elif m["name"] == "normalized_leakage_delta" and m["value"] is not None:
                 leak_val = m["value"]
         
         if asr_val is not None and lid_val is not None and sim_val is not None:
@@ -156,10 +156,10 @@ for key, name in models.items():
         sim_str = format_ci(*stats["sim"], False)
         print(f"| {name} | {d} | {n} | {asr_str} | {lid_str} | {sim_str} |")
 
-print("\n### Table 6: Source-Language Leakage (Language Similarity)")
-print("*Cosine similarity of generated audio language embeddings to the source language reference. Higher indicates more source-language accent/prosody leakage.*")
+print("\n### Table 6: Normalized Source-Language Leakage (Delta)")
+print("*Difference between generated audio's cosine similarity to the source-language centroid vs the target-language centroid. Higher delta (> 0) means the audio sounds more like the source language than the target language.*")
 print()
-print("| Model | Direction | n | Leakage ↑ (95% CI) |")
+print("| Model | Direction | n | Leakage Delta ↓ (95% CI) |")
 print("|---|---|---|---|")
 for key, name in models.items():
     if key not in all_data: continue

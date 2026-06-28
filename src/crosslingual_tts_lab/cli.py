@@ -14,6 +14,7 @@ from crosslingual_tts_lab.open_datasets import (
 from crosslingual_tts_lab.planner import plan_jobs
 from crosslingual_tts_lab.report import write_reports
 from crosslingual_tts_lab.runner import run_benchmark, score_existing_run
+from crosslingual_tts_lab.calibration import compute_calibration
 
 
 MINI_CONFIG = """name = "mini-ru-crosslingual"
@@ -149,6 +150,9 @@ def main(argv: list[str] | None = None) -> int:
     report_parser = subparsers.add_parser("report", help="regenerate Markdown report from a run")
     report_parser.add_argument("--run", type=Path, required=True)
 
+    calibrate_parser = subparsers.add_parser("calibrate", help="compute speaker similarity calibration baselines")
+    calibrate_parser.add_argument("--run", type=Path, required=True)
+
     args = parser.parse_args(argv)
 
     if args.command == "init":
@@ -169,6 +173,8 @@ def main(argv: list[str] | None = None) -> int:
         return _score(args.config, args.run)
     if args.command == "report":
         return _report(args.run)
+    if args.command == "calibrate":
+        return _calibrate(args.run)
     raise AssertionError(f"unhandled command {args.command}")
 
 
@@ -309,6 +315,14 @@ def _report(run_dir: Path) -> int:
         raise SystemExit(f"missing run manifest: {manifest_path}")
     report_path = write_reports(manifest_path)
     print(f"wrote {report_path}")
+    return 0
+
+
+def _calibrate(run_dir: Path) -> int:
+    try:
+        compute_calibration(run_dir)
+    except Exception as exc:
+        raise SystemExit(str(exc)) from exc
     return 0
 
 

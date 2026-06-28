@@ -30,13 +30,14 @@ class SpeechBrainLanguageSimilarityMetric:
             )
 
         try:
-            score = self._cosine_similarity(reference, sample.audio_path)
+            sim_src, sim_tgt, delta = self._calculate_delta(sample)
             return MetricResult(
-                name=self.name,
+                name="normalized_leakage_delta",
                 status="ok",
-                value=round(score, 6),
+                value=round(delta, 6),
                 details={
-                    "reference_audio_path": str(reference),
+                    "sim_source_centroid": round(sim_src, 6),
+                    "sim_target_centroid": round(sim_tgt, 6),
                     "model_id": self._model_id(),
                     "device": self._device(),
                 },
@@ -62,19 +63,36 @@ class SpeechBrainLanguageSimilarityMetric:
                 },
             )
 
-    def _cosine_similarity(self, reference: Path, generated: Path) -> float:
+    def _calculate_delta(self, sample: GeneratedSample) -> tuple[float, float, float]:
+        import json
         import torch
+
+        src_lang = sample.job.voice.language
+        tgt_lang = sample.job.target.language
+
+        centroids_file = Path(__file__).parent / "fleurs_centroids.json"
+        if not centroids_file.exists():
+            raise FileNotFoundError(f"Missing language centroids cache: {centroids_file}")
+            
+        if getattr(self, "_centroids", None) is None:
+            with open(centroids_file, "r") as f:
+                self._centroids = json.load(f)
+
+        if src_lang not in self._centroids or tgt_lang not in self._centroids:
+            raise ValueError(f"Language centroids not available for pairs ({src_lang}->{tgt_lang})")
+
+        src_centroid = torch.tensor(self._centroids[src_lang]).to(self._device())
+        tgt_centroid = torch.tensor(self._centroids[tgt_lang]).to(self._device())
 
         classifier = self._load_classifier()
         with torch.no_grad():
-            ref_embedding = self._encode_file(classifier, reference)
-            gen_embedding = self._encode_file(classifier, generated)
-            score = torch.nn.functional.cosine_similarity(
-                ref_embedding.flatten(),
-                gen_embedding.flatten(),
-                dim=0,
-            )
-        return float(score.detach().cpu().item())
+            gen_embedding = self._encode_file(classifier, sample.audio_path).flatten()
+            sim_src = torch.nn.functional.cosine_similarity(gen_embedding, src_centroid, dim=0)
+            sim_tgt = torch.nn.functional.cosine_similarity(gen_embedding, tgt_centroid, dim=0)
+            
+        sim_src_val = float(sim_src.detach().cpu().item())
+        sim_tgt_val = float(sim_tgt.detach().cpu().item())
+        return sim_src_val, sim_tgt_val, sim_src_val - sim_tgt_val
 
     def _encode_file(self, classifier: Any, path: Path) -> Any:
         if hasattr(classifier, "encode_file"):
