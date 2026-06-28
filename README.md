@@ -1,7 +1,6 @@
 # CrossLingual TTS Lab
 
-CrossLingual TTS Lab is a small benchmark harness for testing voice-language
-disentanglement in multilingual text-to-speech systems.
+CrossLingual TTS Lab is a benchmark harness for evaluating cross-lingual zero-shot voice cloning, focusing on target-language intelligibility, target-language identification, and speaker preservation. Future extensions target direct source-language leakage measurement.
 
 Core question:
 
@@ -342,8 +341,8 @@ Below is the comparative summary of the cross-lingual generalization capabilitie
 
 *Note: Lower ASR error indicates better intelligibility and pronunciation in the target language. Higher Target LID indicates the model successfully transitioned to the target language. Higher Speaker Sim indicates the target-language voice effectively cloned the source speaker's identity.*
 
-### Table 1: Common Subset Only (en, zh targets)
-*Excludes directions unsupported or highly degraded by certain models (e.g., Russian targets for Spark-TTS and F5-TTS).*
+### Table 1: Common Target-Language Subset
+*Only `en` and `zh` target conditions. Excludes target-Russian directions to avoid unsupported/degraded model conditions. F5-TTS target-Russian results are reported in Table 4 for transparency but excluded from this table because the base F5 model is not expected to handle Russian target synthesis reliably.*
 
 | Model | n | ASR Error ↓ (95% CI) | Target LID ↑ (95% CI) | Speaker Sim ↑ (95% CI) |
 |---|---|---|---|---|
@@ -378,6 +377,8 @@ Below is the comparative summary of the cross-lingual generalization capabilitie
 | CosyVoice | zh | 200 | 23.5% [19.8–27.6] | 86.3% [82.9–89.1] | 0.657 [0.634–0.678] |
 | F5-TTS | zh | 200 | 50.5% [45.4–55.9] | 86.0% [83.3–88.7] | 0.451 [0.415–0.486] |
 
+**Interpretation:** Target-language aggregation shows that target Chinese is more difficult for most systems than target English or Russian. Qwen3-TTS remains the most balanced system, while XTTS is highly competitive for target English but degrades on target Chinese. F5-TTS collapses on target Russian, supporting the decision to separate full-coverage and common-subset comparisons.
+
 ### Table 3: Source-Language Aggregates (Speaker Similarity)
 *Aggregated by source language to show how well each model retains speaker identity across origin languages.*
 
@@ -401,6 +402,8 @@ Below is the comparative summary of the cross-lingual generalization capabilitie
 | Spark-TTS | zh | 100 | 0.443 [0.426–0.461] |
 | CosyVoice | zh | 200 | 0.759 [0.744–0.773] |
 | F5-TTS | zh | 200 | 0.689 [0.679–0.699] |
+
+**Interpretation:** Source-language aggregation reveals that ECAPA speaker similarity depends strongly on the reference language, with English references producing remarkably lower similarity across several models compared to Chinese or Russian references. This strongly motivates future calibration against real-real same-speaker and different-speaker baselines to isolate true identity preservation from source-language acoustics.
 
 ### Table 4: Per-Direction Breakdowns
 *Provides full visibility into specific language pairs, exposing asymmetric performance.*
@@ -444,6 +447,8 @@ Below is the comparative summary of the cross-lingual generalization capabilitie
 | F5-TTS | zh->en | 100 | 3.7% [2.5–5.2] | 95.5% [94.1–96.7] | 0.658 [0.643–0.673] |
 | F5-TTS | zh->ru | 100 | 146.3% [130.9–163.4] | 72.1% [67.9–76.5] | 0.721 [0.712–0.731] |
 
+**Interpretation:** Aggregate averages hide severe model-specific and direction-specific failures. Cross-lingual zero-shot voice cloning is highly direction-dependent. For example, while F5-TTS achieves an impressive 3.7% ASR Error on `zh->en`, it completely fails on `*->ru`. CosyVoice struggles with intelligibility in most cross-lingual pairs (e.g., 67.7% ASR Error for `zh->ru`), despite scoring the highest speaker similarity.
+
 ### Table 5: Pareto Ranking
 Better intelligibility / target-language transfer does **not** imply better speaker preservation. This tradeoff is evident across the models:
 
@@ -452,7 +457,15 @@ Better intelligibility / target-language transfer does **not** imply better spea
 - **Best speaker similarity**: CosyVoice
 - **Best small model tradeoff**: Qwen3-TTS 0.6B
 
-*(Note: Speaker similarity requires future calibration against ground-truth positive/negative bounds to fully disentangle voice preservation from channel or language artifacts.)*
+### Future Work: Speaker-Similarity Calibration
+Speaker similarity currently requires calibration against ground-truth positive/negative bounds to fully disentangle voice preservation from channel or language artifacts. Without these, it is difficult to determine if CosyVoice’s high speaker similarity is true voice preservation or an artifact of failed linguistic transfer. Future versions will include the following calibration baselines:
+
+| Pair type | Speaker Sim |
+|---|---:|
+| same speaker real-real | upper bound |
+| different speaker same language | lower bound |
+| different speaker cross-language | lower bound |
+| generated vs wrong reference | false-positive check |
 
 ## Completed Integrations
 
