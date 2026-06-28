@@ -66,13 +66,14 @@ class SpeechBrainSpeakerSimilarityMetric:
         import torch
 
         classifier = self._load_classifier()
-        ref_embedding = self._encode_file(classifier, reference)
-        gen_embedding = self._encode_file(classifier, generated)
-        score = torch.nn.functional.cosine_similarity(
-            ref_embedding.flatten(),
-            gen_embedding.flatten(),
-            dim=0,
-        )
+        with torch.no_grad():
+            ref_embedding = self._encode_file(classifier, reference)
+            gen_embedding = self._encode_file(classifier, generated)
+            score = torch.nn.functional.cosine_similarity(
+                ref_embedding.flatten(),
+                gen_embedding.flatten(),
+                dim=0,
+            )
         return float(score.detach().cpu().item())
 
     def _encode_file(self, classifier: Any, path: Path) -> Any:

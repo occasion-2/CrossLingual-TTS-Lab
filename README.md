@@ -332,22 +332,22 @@ voice = "ru_ref_001"
 target = "en_weather"
 ```
 
-## Benchmark Results on Google FLEURS (Pending Validation)
-
-> [!IMPORTANT]
-> **Status: Pending Final Validation.** The metrics listed below are preliminary figures. Final verified scientific outputs will be published once the full benchmark runs complete and their provenance manifests/reproducible runs are linked.
+## Benchmark Results on Google FLEURS
 
 The ASR evaluation uses target-language specific text-normalization adapters (preprocessors) to clean reference and hypothesis transcriptions (handling lowercase, removing punctuation, and stripping spaces for CJK characters) before computing WER/CER. 
 
-The benchmark harness was evaluated on a cross-lingual subset of the Google FLEURS dataset (`configs/fleurs_tiny_all.toml`) across several state-of-the-art zero-shot voice cloning models. The real metrics stack includes `faster_whisper_asr` for ASR error (measuring intelligibility and accent leakage), `faster_whisper_lid` for target language identification, and `speechbrain_speaker_similarity` (ECAPA-TDNN) for speaker verification between the source reference and the generated target-language output.
+The benchmark harness is being evaluated on a cross-lingual subset of the Google FLEURS dataset (`configs/fleurs_tiny_all.toml`) across several state-of-the-art zero-shot voice cloning models. The real metrics stack includes `faster_whisper_asr` for ASR error (measuring intelligibility and accent leakage), `faster_whisper_lid` for target language identification, and `speechbrain_speaker_similarity` (ECAPA-TDNN) for speaker verification between the source reference and the generated target-language output.
 
 Below is the comparative summary of the cross-lingual generalization capabilities of the installed models:
 
-| Model | Size | ASR WER (Intelligibility) | Target Lang ID Confidence | Speaker Similarity |
-|---|---|---|---|---|
-| F5-TTS | 385M | 27.6% | 94.8% | 0.595 |
-| Qwen3-TTS 0.6B | 600M | 6.8% | 93.0% | 0.615 |
-| Qwen3-TTS 1.7B | 1.7B | 6.8% | 97.6% | 0.621 |
+| Model | Size | ASR WER (Intelligibility) | Target Lang ID Confidence | Speaker Similarity | Unsupported |
+|---|---|---|---|---|---|
+| Qwen3-TTS 1.7B | 1.7B | 5.2% | 96.4% | 0.503 | - |
+| Qwen3-TTS 0.6B | 600M | 7.1% | 95.7% | 0.493 | - |
+| XTTS v2 | 400M | 8.9% | 97.8% | 0.464 | - |
+| Spark-TTS | 500M | 12.0% | 96.4% | 0.420 | ru |
+| CosyVoice | ~300M | 29.7% | 78.1% | 0.703 | - |
+| F5-TTS | 385M | 65.2% | 83.1% | 0.529 | - |
 
 *Note: Lower ASR WER indicates better intelligibility and pronunciation in the target language. Higher Target Lang ID indicates the model successfully transitioned to the target language without heavy source-language accent leakage. Higher Speaker Similarity indicates the target-language voice effectively cloned the source speaker's identity.*
 

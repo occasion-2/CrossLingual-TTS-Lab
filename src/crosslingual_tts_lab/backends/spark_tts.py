@@ -28,10 +28,8 @@ class SparkTTSBackend:
         prompt_text = self._reference_text(job)
 
         if job.target.language not in {"en", "zh", "en-US", "zh-CN"}:
-            import numpy as np
             import warnings
-            warnings.warn(f"Spark-TTS target language '{job.target.language}' is unsupported. Writing placeholder audio.")
-            wav_data = np.zeros(16000, dtype=np.float32)
+            warnings.warn(f"Spark-TTS target language '{job.target.language}' is unsupported. Skipping placeholder audio creation.")
             placeholder = True
         else:
             wav_data = model.inference(
@@ -52,9 +50,9 @@ class SparkTTSBackend:
             if wav_data.size == 0:
                 raise ValueError("Generated empty waveform")
             placeholder = False
-
-        from crosslingual_tts_lab.backends.qwen_tts import _write_wav
-        _write_wav(audio_path, wav_data, 16000)
+            
+            from crosslingual_tts_lab.backends.qwen_tts import _write_wav
+            _write_wav(audio_path, wav_data, 16000)
 
         return SynthesisResult(
             audio_path=audio_path,

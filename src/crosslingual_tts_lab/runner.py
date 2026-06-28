@@ -53,13 +53,14 @@ class SynthesizingSampleSource:
 
     def sample_for(self, job: GenerationJob) -> GeneratedSample:
         audio_path = self.audio_dir / f"{job.id}.wav"
-        if audio_path.exists() and audio_path.stat().st_size > 1000 and job.id in self.existing_metadata:
+        if job.id in self.existing_metadata:
             metadata = self.existing_metadata[job.id]
-            return GeneratedSample(
-                job=job,
-                audio_path=audio_path,
-                synthesis_metadata=metadata,
-            )
+            if metadata.get("synthetic_placeholder", False) or (audio_path.exists() and audio_path.stat().st_size > 1000):
+                return GeneratedSample(
+                    job=job,
+                    audio_path=audio_path,
+                    synthesis_metadata=metadata,
+                )
 
         result = self._backend_for(job).synthesize(job, self.audio_dir)
         return GeneratedSample(
@@ -82,12 +83,13 @@ class ExistingRunSampleSource:
 
     def sample_for(self, job: GenerationJob) -> GeneratedSample:
         audio_path = self.audio_dir / f"{job.id}.wav"
-        if not audio_path.exists():
+        metadata = self.metadata_by_job_id.get(job.id, {})
+        if not audio_path.exists() and not metadata.get("synthetic_placeholder", False):
             raise FileNotFoundError(f"missing generated audio for {job.id}: {audio_path}")
         return GeneratedSample(
             job=job,
             audio_path=audio_path,
-            synthesis_metadata=self.metadata_by_job_id.get(job.id, {}),
+            synthesis_metadata=metadata,
         )
 
 
