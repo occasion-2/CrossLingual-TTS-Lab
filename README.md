@@ -336,20 +336,74 @@ target = "en_weather"
 
 The ASR evaluation uses target-language specific text-normalization adapters (preprocessors) to clean reference and hypothesis transcriptions (handling lowercase, removing punctuation, and stripping spaces for CJK characters) before computing WER/CER. 
 
-The benchmark harness is being evaluated on a cross-lingual subset of the Google FLEURS dataset (`configs/fleurs_tiny_all.toml`) across several state-of-the-art zero-shot voice cloning models. The real metrics stack includes `faster_whisper_asr` for ASR error (measuring intelligibility and accent leakage), `faster_whisper_lid` for target language identification, and `speechbrain_speaker_similarity` (ECAPA-TDNN) for speaker verification between the source reference and the generated target-language output.
+The benchmark harness is being evaluated on a cross-lingual subset of the Google FLEURS dataset (`configs/fleurs_tiny_all.toml`) across several state-of-the-art zero-shot voice cloning models. The real metrics stack includes `faster_whisper_asr` for ASR error (measuring target-language intelligibility), `faster_whisper_lid` for target language identification (acting as a proxy indicator for successful target-language rendering), and `speechbrain_speaker_similarity` (ECAPA-TDNN) for speaker-similarity preservation between the source reference and the generated target-language output.
 
-Below is the comparative summary of the cross-lingual generalization capabilities of the installed models:
+Below is the comparative summary of the cross-lingual generalization capabilities of the installed models.
 
-| Model | Size | ASR WER (Intelligibility) | Target Lang ID Confidence | Speaker Similarity | Unsupported |
-|---|---|---|---|---|---|
-| Qwen3-TTS 1.7B | 1.7B | 5.2% | 96.4% | 0.503 | - |
-| Qwen3-TTS 0.6B | 600M | 7.1% | 95.7% | 0.493 | - |
-| XTTS v2 | 400M | 8.9% | 97.8% | 0.464 | - |
-| Spark-TTS | 500M | 12.0% | 96.4% | 0.420 | ru |
-| CosyVoice | ~300M | 29.7% | 78.1% | 0.703 | - |
-| F5-TTS | 385M | 65.2% | 83.1% | 0.529 | - |
+*Note: Lower ASR error indicates better intelligibility and pronunciation in the target language. Higher Target LID indicates the model successfully transitioned to the target language. Higher Speaker Sim indicates the target-language voice effectively cloned the source speaker's identity.*
 
-*Note: Lower ASR WER indicates better intelligibility and pronunciation in the target language. Higher Target Lang ID indicates the model successfully transitioned to the target language without heavy source-language accent leakage. Higher Speaker Similarity indicates the target-language voice effectively cloned the source speaker's identity.*
+### Table 1: Common Subset Only (en, zh targets)
+*Excludes directions unsupported or highly degraded by certain models (e.g., Russian targets for Spark-TTS and F5-TTS).*
+
+| Model | ASR Error ↓ | Target LID ↑ | Speaker Sim ↑ |
+|---|---|---|---|
+| Qwen3-TTS 1.7B | 7.0% | 96.1% | 0.515 |
+| Qwen3-TTS 0.6B | 8.2% | 94.5% | 0.516 |
+| XTTS v2 | 9.6% | 97.6% | 0.468 |
+| Spark-TTS | 12.0% | 96.4% | 0.420 |
+| CosyVoice | 17.8% | 82.1% | 0.688 |
+| F5-TTS | 31.8% | 90.3% | 0.530 |
+
+### Table 2: Per-Direction Breakdowns
+*Provides full visibility into specific language pairs, exposing asymmetric performance (e.g., F5-TTS struggling heavily with Russian).*
+
+| Model | Direction | ASR Error ↓ | Target LID ↑ | Speaker Sim ↑ |
+|---|---|---|---|---|
+| Qwen3-TTS 1.7B | en->ru | 1.4% | 95.5% | 0.365 |
+| Qwen3-TTS 1.7B | en->zh | 6.6% | 97.6% | 0.394 |
+| Qwen3-TTS 1.7B | ru->en | 4.4% | 92.8% | 0.545 |
+| Qwen3-TTS 1.7B | ru->zh | 13.6% | 99.4% | 0.555 |
+| Qwen3-TTS 1.7B | zh->en | 3.4% | 94.7% | 0.567 |
+| Qwen3-TTS 1.7B | zh->ru | 1.6% | 98.5% | 0.592 |
+| Qwen3-TTS 0.6B | en->ru | 6.7% | 97.0% | 0.327 |
+| Qwen3-TTS 0.6B | en->zh | 7.9% | 97.0% | 0.369 |
+| Qwen3-TTS 0.6B | ru->en | 5.1% | 93.0% | 0.548 |
+| Qwen3-TTS 0.6B | ru->zh | 13.7% | 99.3% | 0.550 |
+| Qwen3-TTS 0.6B | zh->en | 6.2% | 88.9% | 0.595 |
+| Qwen3-TTS 0.6B | zh->ru | 3.1% | 99.2% | 0.569 |
+| XTTS v2 | en->ru | 8.9% | 97.2% | 0.336 |
+| XTTS v2 | en->zh | 17.9% | 96.9% | 0.368 |
+| XTTS v2 | ru->en | 3.5% | 97.0% | 0.447 |
+| XTTS v2 | ru->zh | 13.1% | 99.5% | 0.509 |
+| XTTS v2 | zh->en | 3.8% | 97.2% | 0.547 |
+| XTTS v2 | zh->ru | 6.2% | 98.9% | 0.577 |
+| Spark-TTS | en->zh | 25.5% | 98.4% | 0.319 |
+| Spark-TTS | ru->en | 5.4% | 93.2% | 0.422 |
+| Spark-TTS | ru->zh | 12.7% | 99.4% | 0.497 |
+| Spark-TTS | zh->en | 4.3% | 94.6% | 0.443 |
+| Spark-TTS | *->ru | - | - | - |
+| CosyVoice | en->ru | 39.0% | 68.6% | 0.675 |
+| CosyVoice | en->zh | 14.3% | 95.2% | 0.577 |
+| CosyVoice | ru->en | 11.1% | 72.3% | 0.708 |
+| CosyVoice | ru->zh | 32.7% | 77.4% | 0.737 |
+| CosyVoice | zh->en | 13.2% | 83.4% | 0.731 |
+| CosyVoice | zh->ru | 67.7% | 71.9% | 0.787 |
+| F5-TTS | en->ru | 117.5% | 64.9% | 0.331 |
+| F5-TTS | en->zh | 55.4% | 76.3% | 0.301 |
+| F5-TTS | ru->en | 22.5% | 93.8% | 0.562 |
+| F5-TTS | ru->zh | 45.6% | 95.8% | 0.600 |
+| F5-TTS | zh->en | 3.7% | 95.5% | 0.658 |
+| F5-TTS | zh->ru | 146.3% | 72.1% | 0.721 |
+
+### Table 3: Pareto Ranking
+Better intelligibility / target-language transfer does **not** imply better speaker preservation. This tradeoff is evident across the models:
+
+- **Best intelligibility**: Qwen3-TTS 1.7B
+- **Best target LID**: XTTS v2
+- **Best speaker similarity**: CosyVoice
+- **Best small model tradeoff**: Qwen3-TTS 0.6B
+
+*(Note: Speaker similarity requires future calibration against ground-truth positive/negative bounds to fully disentangle voice preservation from channel or language artifacts.)*
 
 ## Completed Integrations
 
