@@ -37,6 +37,8 @@ if [ "$INSTALL_COSY" = true ] || { [ "$INSTALL_COSY" = false ] && [ "$INSTALL_SP
     if [ ! -d "CosyVoice" ]; then
         echo "Cloning CosyVoice repository..."
         git clone https://github.com/FunASR/CosyVoice.git
+        echo "torch" >> CosyVoice/requirements.txt
+        echo "torchaudio" >> CosyVoice/requirements.txt
     else
         echo "CosyVoice repository already present."
     fi
@@ -53,6 +55,8 @@ if [ "$INSTALL_SPARK" = true ] || { [ "$INSTALL_COSY" = false ] && [ "$INSTALL_S
     if [ ! -d "Spark-TTS" ]; then
         echo "Cloning Spark-TTS repository..."
         git clone https://github.com/SparkAudio/Spark-TTS.git
+        echo "torch" >> Spark-TTS/requirements.txt
+        echo "torchaudio" >> Spark-TTS/requirements.txt
     else
         echo "Spark-TTS repository already present."
     fi
@@ -95,11 +99,11 @@ if [ "$INSTALL_COSY" = true ]; then
     if command -v uv &> /dev/null; then
         echo "Using uv to install..."
         uv pip install "setuptools<70" wheel
-        uv pip install -r CosyVoice/requirements.txt -e ".[open-data,metrics,cosyvoice]" --no-build-isolation-package openai-whisper --no-build-isolation-package deepspeed
+        uv pip install -e ".[open-data,metrics,cosyvoice]" --no-build-isolation-package openai-whisper --no-build-isolation-package deepspeed
     else
         echo "Using pip to install..."
         pip install "setuptools<70" wheel
-        pip install -r CosyVoice/requirements.txt -e ".[open-data,metrics,cosyvoice]" --no-build-isolation-package openai-whisper --no-build-isolation-package deepspeed
+        pip install -e ".[open-data,metrics,cosyvoice]" --no-build-isolation-package openai-whisper --no-build-isolation-package deepspeed
     fi
 fi
 
@@ -116,10 +120,10 @@ if [ "$INSTALL_SPARK" = true ]; then
     
     if command -v uv &> /dev/null; then
         echo "Using uv to install..."
-        uv pip install -r Spark-TTS/requirements.txt -e ".[open-data,metrics,spark-tts]"
+        uv pip install -e ".[open-data,metrics,spark-tts]"
     else
         echo "Using pip to install..."
-        pip install -r Spark-TTS/requirements.txt -e ".[open-data,metrics,spark-tts]"
+        pip install -e ".[open-data,metrics,spark-tts]"
     fi
 fi
 
