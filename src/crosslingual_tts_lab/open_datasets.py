@@ -438,6 +438,11 @@ def _real_metric_specs() -> list[dict[str, Any]]:
             "backend": "speechbrain_speaker_similarity",
             "params": {},
         },
+        {
+            "id": "source_language_similarity",
+            "backend": "speechbrain_language_similarity",
+            "params": {},
+        },
     ]
 
 

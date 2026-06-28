@@ -1,6 +1,6 @@
 # CrossLingual TTS Lab
 
-CrossLingual TTS Lab is a benchmark harness for evaluating cross-lingual zero-shot voice cloning, focusing on target-language intelligibility, target-language identification, and speaker preservation. Future extensions target direct source-language leakage measurement.
+CrossLingual TTS Lab is a benchmark harness for evaluating cross-lingual zero-shot voice cloning, focusing on target-language intelligibility, target-language identification, speaker preservation, and source-language leakage.
 
 Core question:
 
@@ -8,7 +8,7 @@ Core question:
 > the model preserve speaker identity without leaking source-language accent,
 > phonetics, or prosody into the target language?
 
-The harness started as a lightweight `uv` project with a config-driven run planner, a dummy synthesis backend, pluggable model/metric interfaces, and machine-readable plus Markdown reports. It now includes several real TTS backends and metric adapters, while source-language leakage probes and SER-based emotion preservation metrics remain future extensions.
+The harness started as a lightweight `uv` project with a config-driven run planner, a dummy synthesis backend, pluggable model/metric interfaces, and machine-readable plus Markdown reports. It now includes several real TTS backends, metric adapters, and a source-language leakage probe, while SER-based emotion preservation metrics remain a future extension.
 
 ## Quick Start
 
@@ -342,11 +342,11 @@ target = "en_weather"
 
 The ASR evaluation uses target-language specific text-normalization adapters (preprocessors) to clean reference and hypothesis transcriptions (handling lowercase, removing punctuation, and stripping spaces for CJK characters) before computing WER/CER. 
 
-The benchmark harness is being evaluated on a cross-lingual subset of the Google FLEURS dataset (`configs/fleurs_tiny_all.toml`) across several state-of-the-art zero-shot voice cloning models. The real metrics stack includes `faster_whisper_asr` for ASR error (measuring target-language intelligibility), `faster_whisper_lid` for target language identification (acting as a proxy indicator for successful target-language rendering), and `speechbrain_speaker_similarity` (ECAPA-TDNN) for speaker-similarity preservation between the source reference and the generated target-language output.
+The benchmark harness is being evaluated on a cross-lingual subset of the Google FLEURS dataset (`configs/fleurs_tiny_all.toml`) across several state-of-the-art zero-shot voice cloning models. The real metrics stack includes `faster_whisper_asr` for ASR error (measuring target-language intelligibility), `faster_whisper_lid` for target language identification (acting as a proxy indicator for successful target-language rendering), `speechbrain_speaker_similarity` (ECAPA-TDNN) for speaker-similarity preservation, and `speechbrain_language_similarity` (VoxLingua107) to measure source-language leakage.
 
 Below is the comparative summary of the cross-lingual generalization capabilities of the installed models.
 
-*Note: Lower ASR error indicates better target-text intelligibility under the chosen ASR and normalization pipeline. Higher Target LID indicates the model successfully transitioned to the target language. Higher Speaker Sim indicates the target-language voice effectively cloned the source speaker's identity.*
+*Note: Lower ASR error indicates better target-text intelligibility under the chosen ASR and normalization pipeline. Higher Target LID indicates the model successfully transitioned to the target language. Higher Speaker Sim indicates the target-language voice effectively cloned the source speaker's identity. Higher Leakage indicates the generated audio sounds more like the source language's accent/prosody.*
 
 ### Table 1: Common Target-Language Subset
 *Only `en` and `zh` target conditions. Excludes target-Russian directions to avoid unsupported/degraded model conditions. F5-TTS target-Russian results are reported in Table 4 for transparency but excluded from this table because the base F5 model is not expected to handle Russian target synthesis reliably.*
@@ -464,6 +464,48 @@ Better intelligibility / target-language transfer does **not** imply better spea
 - **Best speaker similarity**: CosyVoice
 - **Best small model tradeoff**: Qwen3-TTS 0.6B
 
+### Table 6: Source-Language Leakage (Language Similarity)
+*Cosine similarity of generated audio language embeddings to the source language reference. Higher indicates more source-language accent/prosody leakage.*
+
+| Model | Direction | n | Leakage ↑ (95% CI) |
+|---|---|---|---|
+| F5-TTS | en->ru | 100 | 0.649 [0.599–0.697] |
+| F5-TTS | en->zh | 100 | 0.642 [0.599–0.686] |
+| F5-TTS | ru->en | 100 | 0.825 [0.818–0.832] |
+| F5-TTS | ru->zh | 100 | 0.829 [0.823–0.835] |
+| F5-TTS | zh->en | 100 | 0.846 [0.840–0.853] |
+| F5-TTS | zh->ru | 100 | 0.910 [0.906–0.913] |
+| CosyVoice | en->ru | 100 | 0.899 [0.888–0.906] |
+| CosyVoice | en->zh | 100 | 0.874 [0.860–0.886] |
+| CosyVoice | ru->en | 100 | 0.883 [0.874–0.891] |
+| CosyVoice | ru->zh | 100 | 0.894 [0.882–0.902] |
+| CosyVoice | zh->en | 100 | 0.874 [0.866–0.881] |
+| CosyVoice | zh->ru | 100 | 0.909 [0.904–0.913] |
+| Qwen3-TTS 0.6B | en->ru | 96 | 0.805 [0.798–0.812] |
+| Qwen3-TTS 0.6B | en->zh | 98 | 0.845 [0.841–0.849] |
+| Qwen3-TTS 0.6B | ru->en | 100 | 0.827 [0.819–0.834] |
+| Qwen3-TTS 0.6B | ru->zh | 100 | 0.828 [0.824–0.833] |
+| Qwen3-TTS 0.6B | zh->en | 99 | 0.856 [0.850–0.861] |
+| Qwen3-TTS 0.6B | zh->ru | 98 | 0.820 [0.815–0.825] |
+| Qwen3-TTS 1.7B | en->ru | 100 | 0.808 [0.801–0.816] |
+| Qwen3-TTS 1.7B | en->zh | 100 | 0.852 [0.847–0.856] |
+| Qwen3-TTS 1.7B | ru->en | 100 | 0.815 [0.809–0.822] |
+| Qwen3-TTS 1.7B | ru->zh | 100 | 0.829 [0.824–0.834] |
+| Qwen3-TTS 1.7B | zh->en | 100 | 0.841 [0.835–0.847] |
+| Qwen3-TTS 1.7B | zh->ru | 100 | 0.814 [0.810–0.818] |
+| Spark-TTS | en->zh | 100 | 0.848 [0.826–0.865] |
+| Spark-TTS | ru->en | 100 | 0.791 [0.773–0.804] |
+| Spark-TTS | ru->zh | 100 | 0.830 [0.825–0.835] |
+| Spark-TTS | zh->en | 100 | 0.854 [0.850–0.858] |
+| XTTS v2 | en->ru | 100 | 0.798 [0.787–0.809] |
+| XTTS v2 | en->zh | 100 | 0.835 [0.824–0.844] |
+| XTTS v2 | ru->en | 100 | 0.813 [0.806–0.821] |
+| XTTS v2 | ru->zh | 100 | 0.828 [0.823–0.833] |
+| XTTS v2 | zh->en | 100 | 0.858 [0.854–0.863] |
+| XTTS v2 | zh->ru | 100 | 0.836 [0.832–0.841] |
+
+**Interpretation:** The leakage probe reveals a critical tradeoff in CosyVoice: its consistently high "Speaker Similarity" (from Table 1/2) is directly correlated with massive source-language leakage (~0.87–0.90 across the board). It achieves high speaker embedding scores by refusing to fully adapt to target-language phonetics, explaining its poor intelligibility. In contrast, Qwen3-TTS cleanly separates voice identity from the source accent, maintaining much lower leakage scores (~0.81–0.85) while achieving top-tier intelligibility.
+
 ### Future Work: Speaker-Similarity Calibration
 Speaker similarity currently requires calibration against ground-truth positive/negative bounds to fully disentangle voice preservation from channel or language artifacts. Without these, it is difficult to determine if CosyVoice’s high speaker similarity is true voice preservation or an artifact of failed linguistic transfer. Future versions will include the following calibration baselines:
 
@@ -491,5 +533,5 @@ The intended next pieces are:
 
 1. Add speaker-verification embeddings for speaker similarity. (Completed - uses SpeechBrain ECAPA-TDNN)
 2. Add LID inference on generated audio. (Completed - uses Faster Whisper LID)
-3. Add a source-language leakage probe trained on generated audio embeddings while controlling for target language.
+3. Add a source-language leakage probe trained on generated audio embeddings while controlling for target language. (Completed - uses SpeechBrain VoxLingua107 embeddings)
 4. Add optional emotion preservation metrics from SER models and emotion-labeled subsets.

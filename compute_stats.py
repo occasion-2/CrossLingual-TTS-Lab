@@ -49,7 +49,7 @@ for key, name in models.items():
         if key == "spark_tts" and tgt == "ru":
             continue
             
-        asr_val, lid_val, sim_val = None, None, None
+        asr_val, lid_val, sim_val, leak_val = None, None, None, None
         for m in s.get("metrics", []):
             if m["name"] == "asr_error" and m["value"] is not None:
                 asr_val = m["value"]
@@ -57,6 +57,8 @@ for key, name in models.items():
                 lid_val = m["value"]
             elif m["name"] == "speaker_similarity" and m["value"] is not None:
                 sim_val = m["value"]
+            elif m["name"] == "source_language_similarity" and m["value"] is not None:
+                leak_val = m["value"]
         
         if asr_val is not None and lid_val is not None and sim_val is not None:
             model_samples.append({
@@ -65,7 +67,8 @@ for key, name in models.items():
                 "direction": direction,
                 "asr": asr_val,
                 "lid": lid_val,
-                "sim": sim_val
+                "sim": sim_val,
+                "leak": leak_val
             })
     all_data[key] = model_samples
 
@@ -77,11 +80,14 @@ def get_stats(samples, filter_func=lambda x: True):
     asr_mean, asr_l, asr_u = bootstrap_ci([s["asr"] for s in filtered])
     lid_mean, lid_l, lid_u = bootstrap_ci([s["lid"] for s in filtered])
     sim_mean, sim_l, sim_u = bootstrap_ci([s["sim"] for s in filtered])
+    leak_list = [s["leak"] for s in filtered if s.get("leak") is not None]
+    leak_mean, leak_l, leak_u = bootstrap_ci(leak_list) if leak_list else (0.0, 0.0, 0.0)
     return {
         "n": n,
         "asr": (asr_mean, asr_l, asr_u),
         "lid": (lid_mean, lid_l, lid_u),
-        "sim": (sim_mean, sim_l, sim_u)
+        "sim": (sim_mean, sim_l, sim_u),
+        "leak": (leak_mean, leak_l, leak_u)
     }, n
 
 print("### Table 1: Common Subset Only (en, zh targets)")
@@ -149,4 +155,19 @@ for key, name in models.items():
         lid_str = format_ci(*stats["lid"], True)
         sim_str = format_ci(*stats["sim"], False)
         print(f"| {name} | {d} | {n} | {asr_str} | {lid_str} | {sim_str} |")
+
+print("\n### Table 6: Source-Language Leakage (Language Similarity)")
+print("*Cosine similarity of generated audio language embeddings to the source language reference. Higher indicates more source-language accent/prosody leakage.*")
+print()
+print("| Model | Direction | n | Leakage ↑ (95% CI) |")
+print("|---|---|---|---|")
+for key, name in models.items():
+    if key not in all_data: continue
+    for d in ["en->ru", "en->zh", "ru->en", "ru->zh", "zh->en", "zh->ru"]:
+        stats, n = get_stats(all_data[key], lambda x: x["direction"] == d)
+        if not stats or stats["leak"] == (0.0, 0.0, 0.0):
+            print(f"| {name} | {d} | 0 | - |")
+            continue
+        leak_str = format_ci(*stats["leak"], False)
+        print(f"| {name} | {d} | {n} | {leak_str} |")
 
