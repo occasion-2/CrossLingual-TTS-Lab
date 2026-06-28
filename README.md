@@ -266,7 +266,7 @@ params = {}
 - target-language intelligibility through ASR WER/CER when configured
 - speaker preservation through speaker embeddings when configured
 - language-ID confidence on generated audio when configured
-- source-language leakage placeholder metrics until the probe is added
+- source-language similarity / leakage-proxy metrics when configured
 - optional emotion-preservation placeholders until an SER backend is added
 
 Each generated sample is associated with:
@@ -464,10 +464,10 @@ Better intelligibility / target-language transfer does **not** imply better spea
 - **Best speaker similarity**: CosyVoice
 - **Best small model tradeoff**: Qwen3-TTS 0.6B
 
-### Table 6: Source-Language Leakage (Language Similarity)
-*Cosine similarity of generated audio language embeddings to the source language reference. Higher indicates more source-language accent/prosody leakage.*
+### Table 6: Source-Language Similarity (Leakage Proxy)
+*Cosine similarity of generated audio language embeddings to the source language reference.*
 
-| Model | Direction | n | Leakage ↑ (95% CI) |
+| Model | Direction | n | Source-language similarity ↑ (95% CI) |
 |---|---|---|---|
 | F5-TTS | en->ru | 100 | 0.649 [0.599–0.697] |
 | F5-TTS | en->zh | 100 | 0.642 [0.599–0.686] |
@@ -504,7 +504,21 @@ Better intelligibility / target-language transfer does **not** imply better spea
 | XTTS v2 | zh->en | 100 | 0.858 [0.854–0.863] |
 | XTTS v2 | zh->ru | 100 | 0.836 [0.832–0.841] |
 
-**Interpretation:** The leakage probe reveals a critical tradeoff in CosyVoice: its consistently high "Speaker Similarity" (from Table 1/2) is directly correlated with massive source-language leakage (~0.87–0.90 across the board). It achieves high speaker embedding scores by refusing to fully adapt to target-language phonetics, explaining its poor intelligibility. In contrast, Qwen3-TTS cleanly separates voice identity from the source accent, maintaining much lower leakage scores (~0.81–0.85) while achieving top-tier intelligibility.
+**Interpretation:** The leakage probe reveals a critical tradeoff in CosyVoice: its consistently high "Speaker Similarity" (from Table 1/2) is directly correlated with high source-language similarity (~0.87–0.90 across the board). It achieves high speaker embedding scores by refusing to fully adapt to target-language phonetics, explaining its poor intelligibility. In contrast, Qwen3-TTS shows lower source-language similarity than CosyVoice while maintaining stronger intelligibility, suggesting better separation between voice identity and source-language acoustic cues under this probe.
+
+### Leakage Metric Caveat
+The current leakage score is an embedding-based proxy. It measures source-language similarity in VoxLingua107 embedding space and should be interpreted relatively across models and directions, not as a calibrated perceptual accent-leakage score. Future work will validate it against target-language similarity, real-language centroids, and human accent/prosody judgments.
+
+### Future Work: TASLP Methodological Improvements
+To rigorously validate the leakage metric and speaker similarity for peer-reviewed publication, the following calibrations will be added:
+
+| Needed | Why |
+|---|---|
+| source vs target similarity delta | makes leakage relative, not absolute |
+| real FLEURS language centroids | avoids single-reference noise |
+| generated-vs-target similarity | checks whether output adapted |
+| human accent/nativeness labels | validates the proxy |
+| speaker-sim positive/negative calibration | prevents ECAPA overinterpretation |
 
 ### Future Work: Speaker-Similarity Calibration
 Speaker similarity currently requires calibration against ground-truth positive/negative bounds to fully disentangle voice preservation from channel or language artifacts. Without these, it is difficult to determine if CosyVoice’s high speaker similarity is true voice preservation or an artifact of failed linguistic transfer. Future versions will include the following calibration baselines:
