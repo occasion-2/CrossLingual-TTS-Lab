@@ -53,7 +53,7 @@ class CosyVoiceBackend:
             wav_data = wav_data.flatten()
 
         from crosslingual_tts_lab.backends.qwen_tts import _write_wav
-        _write_wav(audio_path, wav_data, model.sample_rate)
+        _write_wav(audio_path, wav_data, self._sample_rate(model))
 
         return SynthesisResult(
             audio_path=audio_path,
@@ -107,3 +107,14 @@ class CosyVoiceBackend:
 
     def _device(self) -> str:
         return str(self.params.get("device") or detect_device_profile().device)
+
+    def _sample_rate(self, model: Any) -> int:
+        sample_rate = getattr(model, "sample_rate", None)
+        if isinstance(sample_rate, (int, float)) and sample_rate > 0:
+            return int(sample_rate)
+
+        configured = self.params.get("sample_rate", 22050)
+        if isinstance(configured, (int, float)) and configured > 0:
+            return int(configured)
+
+        raise ValueError(f"invalid CosyVoice sample_rate: {configured!r}")

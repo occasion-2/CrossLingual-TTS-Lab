@@ -16,7 +16,17 @@ runs/
 .agents
 .codex
 overnight_runs/
+overnight_runs_cv/
 CosyVoice/
 Spark-TTS/
 .uv-cache/
 pretrained_models/
+paper/*.aux
+paper/*.bbl
+paper/*.blg
+paper/*.fdb_latexmk
+paper/*.fls
+paper/*.log
+paper/*.out
+paper/*.pdf
+paper/*.synctex.gz

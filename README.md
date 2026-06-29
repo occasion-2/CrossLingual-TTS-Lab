@@ -204,6 +204,89 @@ To evaluate multiple model backends cleanly without PyTorch/CUDA dependency pois
 5. **WAV-level Resumability**:
    If a run gets interrupted or fails for one model, running `./run_fleurs_experiment_example.sh` again will instantly skip completed models (based on `report.md`) and skip already-synthesized WAV files, resuming right from the point of failure.
 
+### Common Voice Speaker Calibration Run
+
+FLEURS is still the main direction-aware benchmark used in the paper tables, but its speaker labels are not strong enough for ground-truth same-speaker calibration. To get stronger speaker-similarity bounds, run the Common Voice companion script:
+
+```bash
+./run_common_voice_calibration.sh
+```
+
+This script builds Common Voice configs with repeated reference utterances per known `client_id`/`speaker_id`, runs the same isolated model stack under `overnight_runs_cv/`, and writes `calibration.md` for each model. The calibration command now prefers known same-speaker pairs when repeated speaker IDs are present, while retaining the older inferred FLEURS fallback for legacy runs.
+
+Current `overnight_runs_cv/` snapshot: each full model run contains 600 cross-lingual jobs from 30 Common Voice prompts and 30 targets. F5-TTS, Qwen3-TTS 0.6B, Qwen3-TTS 1.7B, XTTS v2, and CosyVoice all completed 600 scored samples. Spark-TTS completed the 400 supported English/Chinese-target samples and records 200 expected placeholders for target-Russian directions.
+
+The speaker-calibration bounds now come from real Common Voice repeated-speaker IDs, not from inferred FLEURS pseudo-pairs:
+
+| Pair type | Speaker Sim |
+|---|---|
+| same speaker real-real (known speaker ID) | 0.635 ± 0.129 (n=15) |
+| different speaker same language | 0.104 ± 0.104 (n=120) |
+| different speaker cross-language | 0.081 ± 0.090 (n=300) |
+
+Generated-vs-wrong-reference sanity checks from the same run stay near the negative bounds: F5-TTS 0.042 ± 0.075 (n=600), Qwen3-TTS 0.6B 0.059 ± 0.068 (n=600), Qwen3-TTS 1.7B 0.052 ± 0.063 (n=600), XTTS v2 0.064 ± 0.070 (n=600), CosyVoice 0.078 ± 0.082 (n=600), and Spark-TTS 0.058 ± 0.079 (n=400).
+
+Common Voice is no longer usable through the old Hugging Face placeholder repos. The companion script now uses the official Mozilla Data Collective API to fetch the requested locale archives, then extracts only the selected `validated.tsv` rows and clips into `overnight_runs_cv/common_voice/`. Put your Mozilla Data Collective key in `.env` as `COMMONVOICE_APIKEY=...` or set that environment variable before running the script. The parser also accepts spaced `.env` assignments such as `COMMONVOICE_APIKEY = ...`.
+
+Mozilla Data Collective requires accepting the terms for each dataset before the API will issue a download URL. If the script reports a terms error, open the dataset URL in the message while signed in, accept the terms, and rerun the script.
+
+The official API currently returns full locale `.tar.gz` archives. The script caches those archives under `overnight_runs_cv/common_voice_archives/` and resumes interrupted downloads with HTTP range requests. If the connection drops, rerun the same command; it resumes the `.part` archive instead of restarting from byte zero. Set `CV_ARCHIVE_CACHE=/path/with/space` if the default run directory is not large enough for the official archives.
+
+The default API dataset IDs cover the scripted-speech 26.0 `ru`, `en`, and `zh-CN` archives used by the calibration script. For other languages or releases, pass explicit MDC IDs:
+
+```bash
+CV_DATASET_IDS=ru=...,en=...,zh-CN=... ./run_common_voice_calibration.sh
+```
+
+For the English slice, the overnight script defaults to native-labeled Common Voice accents only: `United States English`, `England English`, `Canadian English`, `Australian English`, `New Zealand English`, `Scottish English`, `Irish English`, and `Welsh English`. This excludes blank and non-native English accent labels such as `Nepalese`. Override it with `CV_ACCENT_FILTERS='en=Label|Label'`, or disable accent filtering with `CV_ACCENT_FILTERS=`.
+
+If you already downloaded a local slice before changing the filter, rebuild it with:
+
+```bash
+CV_FORCE_COMMON_VOICE_DOWNLOAD=1 ./run_common_voice_calibration.sh
+```
+
+The Common Voice config generator also filters out very short targets by default in the overnight script (`CV_MIN_TARGET_CHARS=4`). This avoids backend crashes on one-token targets such as `six` or `六`. If a run already produced configs with shorter targets, regenerate configs before rerunning:
+
+```bash
+CV_FORCE_CONFIG=1 ./run_common_voice_calibration.sh
+```
+
+If you need to recompute completed model outputs after changing dataset filters, also set:
+
+```bash
+CV_FORCE_CONFIG=1 CV_FORCE_RUN=1 ./run_common_voice_calibration.sh
+```
+
+Manual local corpora remain supported. To skip the API downloader, point `CV_LOCAL_ROOT` at a directory containing locale folders such as `en/validated.tsv` and `en/clips/`, then set `CV_DOWNLOAD_COMMON_VOICE=0`.
+
+The underlying config generator can also be used directly:
+
+```bash
+uv run python xttslab.py dataset common-voice \
+  --local-root /data/cv-corpus-21.0-2025-03-14 \
+  --languages ru:ru,en:en,zh-CN:zh \
+  --split validated \
+  --voices-per-language 5 \
+  --utterances-per-speaker 2 \
+  --targets-per-language 10 \
+  --model-id dummy_tts \
+  --model-backend dummy \
+  --out overnight_runs_cv/config_dummy.toml
+```
+
+Useful knobs:
+
+```bash
+CV_SPEAKERS_PER_LANGUAGE=8 \
+CV_UTTERANCES_PER_SPEAKER=3 \
+CV_TARGETS_PER_LANGUAGE=10 \
+CV_LANGUAGES=ru:ru,en:en,zh-CN:zh \
+./run_common_voice_calibration.sh
+```
+
+If your downloaded corpus uses `dev.tsv` or `train.tsv` instead of `validated.tsv`, set `CV_SPLIT=dev` or `CV_SPLIT=train`.
+
 To switch a generated config from the dummy backend to XTTS, set:
 
 ```toml
@@ -329,60 +412,60 @@ target = "en_weather"
 ## Reproducibility Snapshot
 
 - **Dataset**: Google FLEURS
-- **Config**: `configs/fleurs_tiny_all.toml`
+- **Config generation**: `run_fleurs_experiment_example.sh`, producing per-model `overnight_runs/config_*.toml` files
 - **Languages**: English, Russian, Mandarin Chinese
 - **Jobs per full direction**: 100
 - **ASR/LID backend**: faster-whisper (medium/small depending on VRAM)
 - **Speaker similarity**: SpeechBrain ECAPA-TDNN (`speechbrain/spkrec-ecapa-voxceleb`)
-- **Confidence intervals**: 95% bootstrap (1000 resamples)
+- **Confidence intervals**: 95% bootstrap (1000 resamples, seed 20260628)
 - **Hardware**: CUDA-enabled GPUs (e.g., 12GB+ VRAM class)
-- **Random seed**: System-default pseudo-random sampling during subset generation
+- **Subset construction**: deterministic first rows after language and length filtering
 
 ## Benchmark Results on Google FLEURS
 
 The ASR evaluation uses target-language specific text-normalization adapters (preprocessors) to clean reference and hypothesis transcriptions (handling lowercase, removing punctuation, and stripping spaces for CJK characters) before computing WER/CER. 
 
-The benchmark harness is being evaluated on a cross-lingual subset of the Google FLEURS dataset (`configs/fleurs_tiny_all.toml`) across several state-of-the-art zero-shot voice cloning models. The real metrics stack includes `faster_whisper_asr` for ASR error (measuring target-language intelligibility), `faster_whisper_lid` for target language identification (acting as a proxy indicator for successful target-language rendering), `speechbrain_speaker_similarity` (ECAPA-TDNN) for speaker-similarity preservation, and `speechbrain_language_similarity` (VoxLingua107) to measure source-language leakage.
+The benchmark harness is being evaluated on a cross-lingual subset of the Google FLEURS dataset generated by `run_fleurs_experiment_example.sh` across several state-of-the-art zero-shot voice cloning models. The real metrics stack includes `faster_whisper_asr` for ASR error (measuring target-language intelligibility), `faster_whisper_lid` for a conservative target-language identification score (detected-language confidence when the detected language matches the target, otherwise 0), `speechbrain_speaker_similarity` (ECAPA-TDNN) for speaker-similarity preservation, and `speechbrain_language_similarity` (VoxLingua107) to measure source-language leakage.
 
 Below is the comparative summary of the cross-lingual generalization capabilities of the installed models.
 
-*Note: Lower ASR error indicates better target-text intelligibility under the chosen ASR and normalization pipeline. Higher Target LID indicates the model successfully transitioned to the target language. Higher Speaker Sim indicates the target-language voice effectively cloned the source speaker's identity. Higher Leakage indicates the generated audio sounds more like the source language's accent/prosody.*
+*Note: Lower ASR error indicates better target-text intelligibility under the chosen ASR and normalization pipeline. Higher Target LID score indicates the model was detected as the target language with high confidence. Higher Speaker Sim indicates stronger speaker-embedding similarity to the reference. Higher Leakage indicates the generated audio sounds more like the source language's accent/prosody.*
 
 ### Table 1: Common Target-Language Subset
 *Only `en` and `zh` target conditions. Excludes target-Russian directions to avoid unsupported/degraded model conditions. F5-TTS target-Russian results are reported in Table 4 for transparency but excluded from this table because the base F5 model is not expected to handle Russian target synthesis reliably.*
 
-| Model | n | ASR Error ↓ (95% CI) | Target LID ↑ (95% CI) | Speaker Sim ↑ (95% CI) |
+| Model | n | ASR Error ↓ (95% CI) | Target LID score ↑ (95% CI) | Speaker Sim ↑ (95% CI) |
 |---|---|---|---|---|
-| Qwen3-TTS 1.7B | 400 | 7.0% [5.9–8.2] | 96.1% [95.4–96.8] | 0.515 [0.503–0.527] |
-| Qwen3-TTS 0.6B | 397 | 7.8% [6.6–9.1] | 94.6% [93.8–95.4] | 0.516 [0.503–0.529] |
-| XTTS v2 | 400 | 9.6% [8.1–11.2] | 97.7% [97.1–98.1] | 0.468 [0.456–0.479] |
-| Spark-TTS | 400 | 11.9% [10.5–13.5] | 96.4% [95.7–97.1] | 0.420 [0.409–0.431] |
-| CosyVoice | 400 | 17.9% [15.5–20.5] | 82.1% [79.8–84.1] | 0.688 [0.673–0.701] |
-| F5-TTS | 400 | 31.8% [28.2–35.1] | 90.3% [88.8–91.8] | 0.530 [0.509–0.551] |
+| Qwen3-TTS 1.7B | 400 | 7.0% [5.9–8.1] | 96.1% [95.4–96.7] | 0.515 [0.503–0.528] |
+| Qwen3-TTS 0.6B | 397 | 7.8% [6.6–9.0] | 94.5% [93.5–95.3] | 0.516 [0.504–0.529] |
+| XTTS v2 | 400 | 9.6% [8.1–11.3] | 97.0% [95.8–98.0] | 0.468 [0.455–0.479] |
+| Spark-TTS | 400 | 11.9% [10.3–13.5] | 96.0% [94.9–96.9] | 0.420 [0.408–0.432] |
+| CosyVoice | 400 | 17.9% [15.4–20.5] | 74.7% [71.5–78.0] | 0.688 [0.674–0.701] |
+| F5-TTS | 400 | 31.8% [28.1–35.5] | 83.1% [79.9–86.3] | 0.530 [0.508–0.550] |
 
 ### Table 2: Target-Language Aggregates
 *Aggregated by target language across all sources.*
 
-| Model | Target | n | ASR Error ↓ (95% CI) | Target LID ↑ (95% CI) | Speaker Sim ↑ (95% CI) |
+| Model | Target | n | ASR Error ↓ (95% CI) | Target LID score ↑ (95% CI) | Speaker Sim ↑ (95% CI) |
 |---|---|---|---|---|---|
-| Qwen3-TTS 1.7B | en | 200 | 3.9% [3.0–4.8] | 93.8% [92.5–94.9] | 0.556 [0.541–0.573] |
-| Qwen3-TTS 0.6B | en | 199 | 5.1% [3.8–6.5] | 91.0% [89.7–92.3] | 0.571 [0.557–0.585] |
-| XTTS v2 | en | 200 | 3.7% [2.7–4.6] | 97.1% [96.7–97.5] | 0.497 [0.483–0.509] |
-| Spark-TTS | en | 200 | 4.8% [3.6–6.3] | 93.9% [92.7–95.0] | 0.433 [0.419–0.445] |
-| CosyVoice | en | 200 | 12.2% [9.7–14.9] | 77.8% [75.1–80.6] | 0.719 [0.704–0.734] |
-| F5-TTS | en | 200 | 13.1% [10.7–15.7] | 94.6% [93.7–95.5] | 0.610 [0.596–0.622] |
-| Qwen3-TTS 1.7B | ru | 200 | 1.5% [1.0–2.1] | 97.0% [96.5–97.5] | 0.479 [0.458–0.499] |
-| Qwen3-TTS 0.6B | ru | 194 | 4.1% [3.1–5.1] | 98.3% [97.9–98.6] | 0.449 [0.429–0.470] |
-| XTTS v2 | ru | 200 | 7.5% [6.0–9.5] | 98.1% [97.3–98.7] | 0.456 [0.435–0.477] |
+| Qwen3-TTS 1.7B | en | 200 | 3.9% [3.0–4.9] | 93.8% [92.6–94.9] | 0.556 [0.540–0.571] |
+| Qwen3-TTS 0.6B | en | 199 | 5.1% [3.8–6.2] | 90.8% [89.0–92.3] | 0.571 [0.557–0.584] |
+| XTTS v2 | en | 200 | 3.7% [2.7–4.6] | 97.1% [96.7–97.5] | 0.497 [0.485–0.509] |
+| Spark-TTS | en | 200 | 4.8% [3.6–6.3] | 93.6% [92.2–95.0] | 0.433 [0.420–0.445] |
+| CosyVoice | en | 200 | 12.2% [9.7–14.8] | 72.7% [68.9–76.6] | 0.719 [0.704–0.734] |
+| F5-TTS | en | 200 | 13.1% [10.8–15.7] | 94.6% [93.6–95.5] | 0.610 [0.596–0.622] |
+| Qwen3-TTS 1.7B | ru | 200 | 1.5% [1.0–2.1] | 97.0% [96.4–97.5] | 0.479 [0.459–0.499] |
+| Qwen3-TTS 0.6B | ru | 194 | 4.1% [3.1–5.3] | 98.3% [97.9–98.6] | 0.449 [0.428–0.473] |
+| XTTS v2 | ru | 200 | 7.5% [6.0–9.4] | 97.5% [96.0–98.7] | 0.456 [0.435–0.479] |
 | Spark-TTS | ru | 0 | - | - | - |
-| CosyVoice | ru | 200 | 53.3% [47.0–60.2] | 70.3% [67.2–73.2] | 0.731 [0.713–0.748] |
-| F5-TTS | ru | 200 | 131.9% [122.7–142.0] | 68.5% [65.8–71.2] | 0.526 [0.484–0.565] |
-| Qwen3-TTS 1.7B | zh | 200 | 10.1% [8.1–12.0] | 98.5% [98.2–98.8] | 0.474 [0.457–0.493] |
-| Qwen3-TTS 0.6B | zh | 198 | 10.6% [8.9–12.7] | 98.2% [97.8–98.6] | 0.460 [0.441–0.478] |
-| XTTS v2 | zh | 200 | 15.5% [12.7–18.6] | 98.2% [97.2–99.0] | 0.439 [0.418–0.459] |
-| Spark-TTS | zh | 200 | 19.1% [16.8–21.6] | 98.9% [98.2–99.4] | 0.408 [0.387–0.428] |
-| CosyVoice | zh | 200 | 23.5% [19.8–27.6] | 86.3% [82.9–89.1] | 0.657 [0.634–0.678] |
-| F5-TTS | zh | 200 | 50.5% [45.4–55.9] | 86.0% [83.3–88.7] | 0.451 [0.415–0.486] |
+| CosyVoice | ru | 200 | 53.3% [47.1–59.9] | 31.4% [25.9–37.1] | 0.731 [0.713–0.748] |
+| F5-TTS | ru | 200 | 131.9% [122.3–142.3] | 0.0% [0.0–0.0] | 0.526 [0.482–0.567] |
+| Qwen3-TTS 1.7B | zh | 200 | 10.1% [8.2–11.9] | 98.5% [98.2–98.7] | 0.474 [0.456–0.491] |
+| Qwen3-TTS 0.6B | zh | 198 | 10.6% [8.9–12.7] | 98.2% [97.8–98.6] | 0.460 [0.441–0.479] |
+| XTTS v2 | zh | 200 | 15.5% [12.7–18.5] | 96.8% [94.4–98.7] | 0.439 [0.421–0.456] |
+| Spark-TTS | zh | 200 | 19.1% [16.7–21.4] | 98.3% [96.8–99.4] | 0.408 [0.387–0.427] |
+| CosyVoice | zh | 200 | 23.5% [19.7–27.4] | 76.8% [71.8–81.9] | 0.657 [0.634–0.678] |
+| F5-TTS | zh | 200 | 50.5% [45.0–55.8] | 71.6% [65.8–77.6] | 0.451 [0.412–0.486] |
 
 **Interpretation:** Target-language aggregation shows that target Chinese is more difficult for most systems than target English or Russian. Qwen3-TTS remains the most balanced system, while XTTS is highly competitive for target English but degrades on target Chinese. F5-TTS collapses on target Russian, supporting the decision to separate full-coverage and common-subset comparisons.
 
@@ -410,49 +493,49 @@ Below is the comparative summary of the cross-lingual generalization capabilitie
 | CosyVoice | zh | 200 | 0.759 [0.744–0.773] |
 | F5-TTS | zh | 200 | 0.689 [0.679–0.699] |
 
-**Interpretation:** Source-language aggregation reveals that ECAPA speaker similarity depends strongly on the reference language, with English references producing remarkably lower similarity across several models compared to Chinese or Russian references. This strongly motivates future calibration against real-real same-speaker and different-speaker baselines to isolate true identity preservation from source-language acoustics.
+**Interpretation:** Source-language aggregation reveals that ECAPA speaker similarity depends strongly on the reference language, with English references producing remarkably lower similarity across several models compared to Chinese or Russian references. The Common Voice calibration table below now provides real-real same-speaker and different-speaker bounds for interpreting those scores instead of relying on FLEURS-only proxies.
 
 ### Table 4: Per-Direction Breakdowns
 *Provides full visibility into specific language pairs, exposing asymmetric performance.*
 
-| Model | Direction | n | ASR Error ↓ (95% CI) | Target LID ↑ (95% CI) | Speaker Sim ↑ (95% CI) |
+| Model | Direction | n | ASR Error ↓ (95% CI) | Target LID score ↑ (95% CI) | Speaker Sim ↑ (95% CI) |
 |---|---|---|---|---|---|
-| Qwen3-TTS 1.7B | en->ru | 100 | 1.4% [0.8–2.2] | 95.5% [94.5–96.4] | 0.365 [0.345–0.389] |
-| Qwen3-TTS 1.7B | en->zh | 100 | 6.6% [4.2–9.1] | 97.6% [97.1–98.0] | 0.394 [0.373–0.413] |
-| Qwen3-TTS 1.7B | ru->en | 100 | 4.4% [3.1–5.8] | 92.8% [90.7–94.7] | 0.545 [0.523–0.570] |
-| Qwen3-TTS 1.7B | ru->zh | 100 | 13.6% [10.7–16.6] | 99.4% [99.3–99.5] | 0.555 [0.535–0.574] |
-| Qwen3-TTS 1.7B | zh->en | 100 | 3.4% [2.2–4.8] | 94.7% [93.4–95.9] | 0.567 [0.546–0.589] |
-| Qwen3-TTS 1.7B | zh->ru | 100 | 1.6% [0.9–2.4] | 98.5% [98.2–98.7] | 0.592 [0.578–0.607] |
-| Qwen3-TTS 0.6B | en->ru | 96 | 5.8% [4.1–7.7] | 97.2% [96.7–97.8] | 0.327 [0.304–0.349] |
-| Qwen3-TTS 0.6B | en->zh | 98 | 7.5% [5.0–9.9] | 97.1% [96.4–97.7] | 0.369 [0.349–0.391] |
-| Qwen3-TTS 0.6B | ru->en | 100 | 5.1% [3.4–6.7] | 93.0% [91.2–94.5] | 0.548 [0.526–0.570] |
-| Qwen3-TTS 0.6B | ru->zh | 100 | 13.7% [10.9–16.6] | 99.3% [99.2–99.4] | 0.550 [0.532–0.568] |
-| Qwen3-TTS 0.6B | zh->en | 99 | 5.0% [3.4–6.9] | 89.0% [86.8–91.0] | 0.595 [0.580–0.611] |
-| Qwen3-TTS 0.6B | zh->ru | 98 | 2.5% [1.5–3.6] | 99.2% [99.1–99.4] | 0.569 [0.553–0.586] |
-| XTTS v2 | en->ru | 100 | 8.9% [6.2–12.8] | 97.2% [95.7–98.5] | 0.336 [0.311–0.362] |
-| XTTS v2 | en->zh | 100 | 17.9% [12.7–23.4] | 96.9% [95.0–98.5] | 0.368 [0.342–0.394] |
-| XTTS v2 | ru->en | 100 | 3.5% [2.3–4.8] | 97.0% [96.5–97.5] | 0.447 [0.434–0.460] |
-| XTTS v2 | ru->zh | 100 | 13.1% [10.5–15.8] | 99.5% [99.4–99.5] | 0.509 [0.492–0.526] |
-| XTTS v2 | zh->en | 100 | 3.8% [2.3–5.3] | 97.2% [96.6–97.8] | 0.547 [0.533–0.562] |
-| XTTS v2 | zh->ru | 100 | 6.2% [4.8–7.6] | 98.9% [98.8–99.1] | 0.577 [0.564–0.588] |
+| Qwen3-TTS 1.7B | en->ru | 100 | 1.4% [0.8–2.2] | 95.5% [94.6–96.4] | 0.365 [0.343–0.386] |
+| Qwen3-TTS 1.7B | en->zh | 100 | 6.6% [4.4–9.1] | 97.6% [97.1–98.0] | 0.394 [0.373–0.413] |
+| Qwen3-TTS 1.7B | ru->en | 100 | 4.4% [3.1–5.7] | 92.8% [90.7–94.5] | 0.545 [0.523–0.567] |
+| Qwen3-TTS 1.7B | ru->zh | 100 | 13.6% [10.5–16.5] | 99.4% [99.3–99.4] | 0.555 [0.536–0.574] |
+| Qwen3-TTS 1.7B | zh->en | 100 | 3.4% [2.3–4.8] | 94.7% [93.2–95.9] | 0.567 [0.545–0.587] |
+| Qwen3-TTS 1.7B | zh->ru | 100 | 1.6% [0.9–2.3] | 98.5% [98.2–98.8] | 0.592 [0.578–0.606] |
+| Qwen3-TTS 0.6B | en->ru | 96 | 5.8% [3.9–7.8] | 97.2% [96.6–97.8] | 0.327 [0.305–0.350] |
+| Qwen3-TTS 0.6B | en->zh | 98 | 7.5% [5.1–9.9] | 97.1% [96.3–97.7] | 0.369 [0.348–0.390] |
+| Qwen3-TTS 0.6B | ru->en | 100 | 5.1% [3.5–7.1] | 93.0% [91.3–94.6] | 0.548 [0.524–0.570] |
+| Qwen3-TTS 0.6B | ru->zh | 100 | 13.7% [11.0–16.4] | 99.3% [99.2–99.4] | 0.550 [0.532–0.568] |
+| Qwen3-TTS 0.6B | zh->en | 99 | 5.0% [3.3–6.9] | 88.5% [85.4–90.9] | 0.595 [0.579–0.611] |
+| Qwen3-TTS 0.6B | zh->ru | 98 | 2.5% [1.5–3.5] | 99.2% [99.1–99.4] | 0.569 [0.554–0.584] |
+| XTTS v2 | en->ru | 100 | 8.9% [5.8–12.2] | 96.2% [93.1–98.5] | 0.336 [0.313–0.361] |
+| XTTS v2 | en->zh | 100 | 17.9% [13.1–23.0] | 94.1% [89.3–98.0] | 0.368 [0.341–0.392] |
+| XTTS v2 | ru->en | 100 | 3.5% [2.4–4.8] | 97.0% [96.5–97.4] | 0.447 [0.434–0.460] |
+| XTTS v2 | ru->zh | 100 | 13.1% [10.3–15.7] | 99.5% [99.4–99.5] | 0.509 [0.492–0.527] |
+| XTTS v2 | zh->en | 100 | 3.8% [2.3–5.4] | 97.2% [96.5–97.8] | 0.547 [0.533–0.562] |
+| XTTS v2 | zh->ru | 100 | 6.2% [4.9–7.6] | 98.9% [98.8–99.1] | 0.577 [0.565–0.588] |
 | Spark-TTS | en->ru | 0 | - | - | - |
-| Spark-TTS | en->zh | 100 | 25.5% [22.0–29.1] | 98.4% [97.1–99.4] | 0.319 [0.295–0.343] |
-| Spark-TTS | ru->en | 100 | 5.4% [3.4–7.8] | 93.2% [91.1–94.9] | 0.422 [0.402–0.441] |
-| Spark-TTS | ru->zh | 100 | 12.7% [10.2–15.6] | 99.4% [99.3–99.5] | 0.497 [0.479–0.515] |
-| Spark-TTS | zh->en | 100 | 4.3% [2.9–5.8] | 94.6% [93.2–95.9] | 0.443 [0.427–0.461] |
+| Spark-TTS | en->zh | 100 | 25.5% [21.8–29.0] | 97.3% [94.3–99.4] | 0.319 [0.296–0.342] |
+| Spark-TTS | ru->en | 100 | 5.4% [3.6–7.9] | 93.2% [91.2–94.7] | 0.422 [0.402–0.441] |
+| Spark-TTS | ru->zh | 100 | 12.7% [10.1–15.3] | 99.4% [99.3–99.5] | 0.497 [0.478–0.516] |
+| Spark-TTS | zh->en | 100 | 4.3% [3.0–6.0] | 94.1% [91.6–96.0] | 0.443 [0.426–0.462] |
 | Spark-TTS | zh->ru | 0 | - | - | - |
-| CosyVoice | en->ru | 100 | 39.0% [32.9–45.1] | 68.6% [64.3–72.7] | 0.675 [0.645–0.701] |
-| CosyVoice | en->zh | 100 | 14.3% [9.8–18.8] | 95.2% [93.1–96.9] | 0.577 [0.545–0.604] |
-| CosyVoice | ru->en | 100 | 11.1% [8.1–14.5] | 72.3% [67.9–76.4] | 0.708 [0.685–0.728] |
-| CosyVoice | ru->zh | 100 | 32.7% [26.6–38.5] | 77.4% [72.0–82.4] | 0.737 [0.713–0.758] |
-| CosyVoice | zh->en | 100 | 13.2% [9.4–17.2] | 83.4% [80.9–86.1] | 0.731 [0.708–0.749] |
-| CosyVoice | zh->ru | 100 | 67.7% [56.1–78.2] | 71.9% [67.5–76.4] | 0.787 [0.767–0.802] |
-| F5-TTS | en->ru | 100 | 117.5% [108.0–128.2] | 64.9% [62.0–67.8] | 0.331 [0.269–0.395] |
-| F5-TTS | en->zh | 100 | 55.4% [46.4–64.9] | 76.3% [71.5–80.4] | 0.301 [0.242–0.360] |
-| F5-TTS | ru->en | 100 | 22.5% [18.7–26.9] | 93.8% [92.6–94.8] | 0.562 [0.542–0.580] |
-| F5-TTS | ru->zh | 100 | 45.6% [39.8–53.0] | 95.8% [93.6–97.5] | 0.600 [0.582–0.618] |
-| F5-TTS | zh->en | 100 | 3.7% [2.5–5.2] | 95.5% [94.1–96.7] | 0.658 [0.643–0.673] |
-| F5-TTS | zh->ru | 100 | 146.3% [130.9–163.4] | 72.1% [67.9–76.5] | 0.721 [0.712–0.731] |
+| CosyVoice | en->ru | 100 | 39.0% [33.0–45.1] | 41.3% [33.1–48.8] | 0.675 [0.645–0.701] |
+| CosyVoice | en->zh | 100 | 14.3% [9.8–19.5] | 92.5% [87.6–96.1] | 0.577 [0.547–0.604] |
+| CosyVoice | ru->en | 100 | 11.1% [8.2–14.6] | 62.9% [56.0–69.3] | 0.708 [0.686–0.730] |
+| CosyVoice | ru->zh | 100 | 32.7% [27.1–38.8] | 61.2% [52.5–69.8] | 0.737 [0.714–0.757] |
+| CosyVoice | zh->en | 100 | 13.2% [9.6–17.5] | 82.5% [79.0–85.5] | 0.731 [0.708–0.749] |
+| CosyVoice | zh->ru | 100 | 67.7% [57.3–78.7] | 21.5% [14.3–29.8] | 0.787 [0.767–0.803] |
+| F5-TTS | en->ru | 100 | 117.5% [107.8–128.7] | 0.0% [0.0–0.0] | 0.331 [0.270–0.393] |
+| F5-TTS | en->zh | 100 | 55.4% [46.8–64.6] | 49.3% [39.4–58.2] | 0.301 [0.246–0.357] |
+| F5-TTS | ru->en | 100 | 22.5% [18.5–26.7] | 93.8% [92.5–94.8] | 0.562 [0.543–0.581] |
+| F5-TTS | ru->zh | 100 | 45.6% [39.8–52.5] | 93.9% [90.1–97.0] | 0.600 [0.583–0.617] |
+| F5-TTS | zh->en | 100 | 3.7% [2.3–5.2] | 95.5% [94.0–96.8] | 0.658 [0.643–0.673] |
+| F5-TTS | zh->ru | 100 | 146.3% [131.4–162.4] | 0.0% [0.0–0.0] | 0.721 [0.710–0.730] |
 
 **Interpretation:** Aggregate averages hide severe model-specific and direction-specific failures. Cross-lingual zero-shot voice cloning is highly direction-dependent. For example, while F5-TTS achieves an impressive 3.7% ASR Error on `zh->en`, it completely fails on `*->ru`. CosyVoice struggles with intelligibility in most cross-lingual pairs (e.g., 67.7% ASR Error for `zh->ru`), despite scoring the highest speaker similarity.
 
@@ -510,18 +593,23 @@ Better intelligibility / target-language transfer does **not** imply better spea
 The current leakage score is an embedding-based proxy using VoxLingua107 space normalized against FLEURS language centroids. While directional trends are clear, future work will validate it against human accent/prosody judgments.
 
 ### Table 7: Speaker-Similarity Calibration
-*Speaker similarity requires calibration against ground-truth positive/negative bounds to fully disentangle voice preservation from channel or language artifacts. The following bounds were dynamically extracted from the FLEURS config for Qwen3-TTS 1.7B:*
+*Speaker similarity requires calibration against ground-truth positive/negative bounds to fully disentangle voice preservation from channel or language artifacts. The following bounds are extracted from `overnight_runs_cv/`, using known repeated Common Voice `client_id`/`speaker_id` values rather than inferred FLEURS pseudo-pairs:*
 
 | Pair type | Speaker Sim |
 |---|---|
-| same speaker real-real (inferred)* | 0.692 ± 0.102 (n=32) |
-| different speaker same language | 0.111 ± 0.095 (n=103) |
-| different speaker cross-language | 0.058 ± 0.074 (n=300) |
-| generated vs wrong reference | 0.091 ± 0.109 (n=600) |
+| same speaker real-real (known speaker ID) | 0.635 ± 0.129 (n=15) |
+| different speaker same language | 0.104 ± 0.104 (n=120) |
+| different speaker cross-language | 0.081 ± 0.090 (n=300) |
+| generated vs wrong reference, F5-TTS | 0.042 ± 0.075 (n=600) |
+| generated vs wrong reference, Qwen3-TTS 0.6B | 0.059 ± 0.068 (n=600) |
+| generated vs wrong reference, Qwen3-TTS 1.7B | 0.052 ± 0.063 (n=600) |
+| generated vs wrong reference, XTTS v2 | 0.064 ± 0.070 (n=600) |
+| generated vs wrong reference, CosyVoice | 0.078 ± 0.082 (n=600) |
+| generated vs wrong reference, Spark-TTS | 0.058 ± 0.079 (n=400) |
 
-*\* Note: 'same speaker real-real' is inferred by clustering FLEURS same-language pairs with sim >= 0.4, as FLEURS lacks explicit speaker IDs.*
+Note: same-speaker cross-language calibration is still `N/A` in this Common Voice slice because the available repeated speaker IDs are within locale, not across languages.
 
-**Interpretation:** The calibration matrix confirms that ECAPA-TDNN effectively separates same-speaker pairs (~0.69) from different-speaker pairs (~0.11 same-language, ~0.06 cross-language). The `generated vs wrong reference` false-positive check (~0.09) sits safely at the different-speaker bound, proving the metric is not artificially inflated by cross-language leakage. This confirms that CosyVoice’s high speaker similarity (0.688 on average) represents genuine voice cloning (matching the 0.69 real-real upper bound), even though its intelligibility simultaneously collapses.
+**Interpretation:** The calibration matrix now gives a real-real same-speaker bound from known Common Voice IDs: ECAPA-TDNN places repeated same-speaker utterances around ~0.64, while different-speaker pairs sit near ~0.10 or below. The `generated vs wrong reference` checks remain close to those negative bounds across all models, which is a useful sanity check against trivial score inflation. CosyVoice’s high FLEURS speaker similarity should therefore be treated as a plausible voice-preservation signal relative to calibrated bounds, not as proof of ground-truth identity preservation.
 
 ### Future Work: TASLP Methodological Improvements
 To rigorously validate speaker similarity and phonetic disentanglement for peer-reviewed publication, the following validation remains:

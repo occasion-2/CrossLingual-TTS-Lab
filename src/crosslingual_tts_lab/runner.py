@@ -105,7 +105,32 @@ def _execute_benchmark(
     samples: list[GeneratedSample] = []
     metric_results: dict[str, list[MetricResult]] = {}
     for job in tqdm(jobs, desc="Running benchmark"):
-        sample = sample_source.sample_for(job)
+        try:
+            sample = sample_source.sample_for(job)
+        except Exception as exc:
+            sample = GeneratedSample(
+                job=job,
+                audio_path=out_dir / "audio" / f"{job.id}.wav",
+                synthesis_metadata={
+                    "backend": job.model.backend,
+                    "synthesis_failed": True,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
+            samples.append(sample)
+            metric_results[job.id] = [
+                MetricResult(
+                    name=metric.name,
+                    status="synthesis_failed",
+                    value=None,
+                    details={"reason": str(exc), "error_type": type(exc).__name__},
+                )
+                for metric in metrics
+            ]
+            _cleanup_accelerators()
+            continue
+
         samples.append(sample)
         if sample.synthesis_metadata.get("synthetic_placeholder", False):
             metric_results[job.id] = [
@@ -120,16 +145,7 @@ def _execute_benchmark(
         else:
             metric_results[job.id] = [metric.evaluate(sample) for metric in metrics]
 
-        import gc
-        gc.collect()
-        import sys
-        if "torch" in sys.modules:
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            except Exception:
-                pass
+        _cleanup_accelerators()
 
     manifest = _build_manifest(config, jobs, samples, metric_results, device_profile.to_dict())
     return _write_manifest(out_dir, manifest)
@@ -137,6 +153,21 @@ def _execute_benchmark(
 
 def _backend_cache_key(job: GenerationJob) -> tuple[str, str]:
     return (job.model.backend, json.dumps(job.model.params, sort_keys=True))
+
+
+def _cleanup_accelerators() -> None:
+    import gc
+    import sys
+
+    gc.collect()
+    if "torch" in sys.modules:
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
 
 
 def _write_manifest(out_dir: Path, manifest: dict) -> Path:

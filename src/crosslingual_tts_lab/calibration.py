@@ -4,6 +4,7 @@ import json
 from itertools import combinations
 from pathlib import Path
 
+
 def compute_calibration(run_dir: Path) -> None:
     manifest_path = run_dir / "manifest.json"
     if not manifest_path.exists():
@@ -33,7 +34,7 @@ def compute_calibration(run_dir: Path) -> None:
         print("No samples found in manifest")
         return
         
-    # Extract unique voices
+    # Extract unique reference utterances.
     voices_dict = {}
     for s in samples:
         v = s["voice"]
@@ -43,26 +44,47 @@ def compute_calibration(run_dir: Path) -> None:
     print(f"Encoding {len(voices)} unique voices...")
     voice_embs = {}
     voice_langs = {}
+    voice_speakers = {}
     for v in voices:
         emb = encode_file(v["audio_path"]).cpu()
         voice_embs[v["id"]] = emb
         voice_langs[v["id"]] = v["language"]
-        
-    # Calculate different speaker baselines
-    same_speaker_real_real = []
+        voice_speakers[v["id"]] = v.get("speaker_id") or v["id"]
+
+    # Prefer datasets with explicit speaker IDs and multiple utterances per speaker.
+    known_same_speaker_real_real = []
+    known_same_speaker_cross_language = []
+    inferred_same_speaker_real_real = []
     diff_spk_same_lang = []
     diff_spk_cross_lang = []
     
     for v1, v2 in combinations(voices, 2):
         id1, id2 = v1["id"], v2["id"]
         sim = torch.nn.functional.cosine_similarity(voice_embs[id1], voice_embs[id2], dim=0).item()
-        if voice_langs[id1] == voice_langs[id2]:
-            if sim >= 0.4:
-                same_speaker_real_real.append(sim)
+        same_speaker = voice_speakers[id1] == voice_speakers[id2]
+        same_language = voice_langs[id1] == voice_langs[id2]
+        if same_speaker:
+            if same_language:
+                known_same_speaker_real_real.append(sim)
             else:
-                diff_spk_same_lang.append(sim)
+                known_same_speaker_cross_language.append(sim)
+        elif same_language:
+            diff_spk_same_lang.append(sim)
         else:
             diff_spk_cross_lang.append(sim)
+
+    if not known_same_speaker_real_real:
+        for v1, v2 in combinations(voices, 2):
+            id1, id2 = v1["id"], v2["id"]
+            if voice_langs[id1] != voice_langs[id2]:
+                continue
+            sim = torch.nn.functional.cosine_similarity(
+                voice_embs[id1],
+                voice_embs[id2],
+                dim=0,
+            ).item()
+            if sim >= 0.4:
+                inferred_same_speaker_real_real.append(sim)
             
     # Calculate generated vs wrong reference
     gen_vs_wrong_ref = []
@@ -74,8 +96,13 @@ def compute_calibration(run_dir: Path) -> None:
             
         src_voice_id = s["voice"]["id"]
         src_lang = s["voice"]["language"]
-        # Find a wrong voice id from a DIFFERENT language to guarantee different speaker
-        wrong_voices = [v_id for v_id, lang in voice_langs.items() if lang != src_lang]
+        src_speaker = voice_speakers[src_voice_id]
+        # Find a wrong voice from a different language and different known speaker.
+        wrong_voices = [
+            v_id
+            for v_id, lang in voice_langs.items()
+            if lang != src_lang and voice_speakers[v_id] != src_speaker
+        ]
         if not wrong_voices:
             continue
             
@@ -99,12 +126,15 @@ def compute_calibration(run_dir: Path) -> None:
         "### Speaker Similarity Calibration (ECAPA-TDNN)",
         "| Pair type | Speaker Sim |",
         "|---|---|",
-        f"| same speaker real-real (inferred) | {get_stats(same_speaker_real_real)} |",
+        f"| same speaker real-real (known speaker ID) | {get_stats(known_same_speaker_real_real)} |",
+        f"| same speaker cross-language (known speaker ID) | {get_stats(known_same_speaker_cross_language)} |",
+        f"| same speaker real-real (inferred fallback) | {get_stats(inferred_same_speaker_real_real)} |",
         f"| different speaker same language | {get_stats(diff_spk_same_lang)} |",
         f"| different speaker cross-language | {get_stats(diff_spk_cross_lang)} |",
         f"| generated vs wrong reference | {get_stats(gen_vs_wrong_ref)} |",
         "",
-        "Note: 'same speaker real-real' is inferred by clustering FLEURS same-language pairs with sim >= 0.4, as FLEURS lacks explicit speaker IDs."
+        "Note: known-speaker rows use repeated speaker_id values when the run config provides them. "
+        "The inferred fallback is only populated for legacy datasets such as FLEURS where each reference utterance has a unique pseudo-speaker ID."
     ]
     
     report = "\n".join(lines)

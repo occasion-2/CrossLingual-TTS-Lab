@@ -3,6 +3,9 @@ import glob
 import numpy as np
 import os
 
+BOOTSTRAP_SEED = 20260628
+rng = np.random.default_rng(BOOTSTRAP_SEED)
+
 models = {
     "f5tts": "F5-TTS",
     "cosyvoice": "CosyVoice",
@@ -18,7 +21,7 @@ def bootstrap_ci(data, num_bootstraps=1000, ci=95):
     data = np.array(data)
     if len(data) == 1:
         return data[0], data[0], data[0]
-    bootstrapped_means = np.random.choice(data, size=(num_bootstraps, len(data)), replace=True).mean(axis=1)
+    bootstrapped_means = rng.choice(data, size=(num_bootstraps, len(data)), replace=True).mean(axis=1)
     lower = np.percentile(bootstrapped_means, (100 - ci) / 2)
     upper = np.percentile(bootstrapped_means, 100 - (100 - ci) / 2)
     return data.mean(), lower, upper
@@ -31,7 +34,7 @@ def format_ci(mean, lower, upper, is_pct=False):
 all_data = {}
 
 for key, name in models.items():
-    manifest_path = f"overnight_runs/results_{key}/manifest.json"
+    manifest_path = f"overnight_runs_cv/results_{key}/manifest.json"
     if not os.path.exists(manifest_path):
         continue
     with open(manifest_path, "r", encoding="utf-8") as f:
@@ -54,7 +57,13 @@ for key, name in models.items():
             if m["name"] == "asr_error" and m["value"] is not None:
                 asr_val = m["value"]
             elif m["name"] == "target_language_id" and m["value"] is not None:
-                lid_val = m["value"]
+                details = m.get("details", {})
+                if "target_language_probability" in details:
+                    lid_val = details["target_language_probability"]
+                elif "matches_target" in details:
+                    lid_val = m["value"] if details["matches_target"] else 0.0
+                else:
+                    lid_val = m["value"]
             elif m["name"] == "speaker_similarity" and m["value"] is not None:
                 sim_val = m["value"]
             elif m["name"] == "normalized_leakage_delta" and m["value"] is not None:
@@ -93,7 +102,8 @@ def get_stats(samples, filter_func=lambda x: True):
 print("### Table 1: Common Subset Only (en, zh targets)")
 print("*Excludes directions unsupported or highly degraded by certain models (e.g., Russian targets for Spark-TTS and F5-TTS).*")
 print()
-print("| Model | n | ASR Error ↓ (95% CI) | Target LID ↑ (95% CI) | Speaker Sim ↑ (95% CI) |")
+print(f"<!-- Bootstrap seed: {BOOTSTRAP_SEED} -->")
+print("| Model | n | ASR Error ↓ (95% CI) | Target LID score ↑ (95% CI) | Speaker Sim ↑ (95% CI) |")
 print("|---|---|---|---|---|")
 for key, name in models.items():
     if key not in all_data: continue
@@ -108,7 +118,7 @@ for key, name in models.items():
 print("\n### Table 2: Target-Language Aggregates")
 print("*Aggregated by target language across all sources.*")
 print()
-print("| Model | Target | n | ASR Error ↓ (95% CI) | Target LID ↑ (95% CI) | Speaker Sim ↑ (95% CI) |")
+print("| Model | Target | n | ASR Error ↓ (95% CI) | Target LID score ↑ (95% CI) | Speaker Sim ↑ (95% CI) |")
 print("|---|---|---|---|---|---|")
 for tgt in ["en", "ru", "zh"]:
     for key, name in models.items():
@@ -142,7 +152,7 @@ for src in ["en", "ru", "zh"]:
 print("\n### Table 4: Per-Direction Breakdowns")
 print("*Provides full visibility into specific language pairs, exposing asymmetric performance.*")
 print()
-print("| Model | Direction | n | ASR Error ↓ (95% CI) | Target LID ↑ (95% CI) | Speaker Sim ↑ (95% CI) |")
+print("| Model | Direction | n | ASR Error ↓ (95% CI) | Target LID score ↑ (95% CI) | Speaker Sim ↑ (95% CI) |")
 print("|---|---|---|---|---|---|")
 for key, name in models.items():
     if key not in all_data: continue
@@ -170,4 +180,3 @@ for key, name in models.items():
             continue
         leak_str = format_ci(*stats["leak"], False)
         print(f"| {name} | {d} | {n} | {leak_str} |")
-

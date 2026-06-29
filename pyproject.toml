@@ -146,6 +146,19 @@ flash-attn = ["torch"]
 deepspeed = ["wheel", "setuptools<70"]
 openai-whisper = ["setuptools<70"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+norecursedirs = [
+  ".git",
+  ".venv",
+  ".uv-cache",
+  "CosyVoice",
+  "Spark-TTS",
+  "overnight_runs",
+  "pretrained_models",
+]
+
 
 
 
@@ -174,7 +187,5 @@ requires-dist = [
   "more-itertools",
   "tiktoken",
 ]
-
-
 
 

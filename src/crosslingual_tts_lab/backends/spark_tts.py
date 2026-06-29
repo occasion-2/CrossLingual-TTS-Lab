@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import inspect
 from pathlib import Path
 from typing import Any
 
@@ -32,15 +33,7 @@ class SparkTTSBackend:
             warnings.warn(f"Spark-TTS target language '{job.target.language}' is unsupported. Skipping placeholder audio creation.")
             placeholder = True
         else:
-            wav_data = model.inference(
-                text=job.target.text,
-                prompt_speech_path=str(job.voice.audio_path),
-                prompt_text=prompt_text,
-                gender=self.params.get("gender"),
-                pitch=self.params.get("pitch"),
-                speed=self.params.get("speed"),
-                seed=self.params.get("seed"),
-            )
+            wav_data = model.inference(**self._inference_kwargs(model, job, prompt_text))
             if hasattr(wav_data, "cpu"):
                 wav_data = wav_data.cpu().numpy()
 
@@ -96,6 +89,25 @@ class SparkTTSBackend:
         if mode == "literal":
             return str(self.params.get("ref_text", "")) or None
         return job.voice.transcript or None
+
+    def _inference_kwargs(self, model: Any, job: GenerationJob, prompt_text: str | None) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {
+            "text": job.target.text,
+            "prompt_speech_path": str(job.voice.audio_path),
+            "prompt_text": prompt_text,
+        }
+        for key in ("gender", "pitch", "speed", "temperature", "top_k", "top_p", "seed"):
+            value = self.params.get(key)
+            if value is not None:
+                kwargs[key] = value
+
+        try:
+            signature = inspect.signature(model.inference)
+        except (TypeError, ValueError):
+            return kwargs
+        if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in signature.parameters.values()):
+            return kwargs
+        return {key: value for key, value in kwargs.items() if key in signature.parameters}
 
     def _model_name(self) -> str:
         return str(

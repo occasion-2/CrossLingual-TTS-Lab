@@ -20,11 +20,11 @@ def render_markdown_report(manifest: dict) -> str:
     has_placeholders = False
     for sample in manifest.get("samples", []):
         metadata = sample.get("synthesis_metadata", {})
-        if metadata.get("synthetic_placeholder", False):
+        if metadata.get("synthetic_placeholder", False) or metadata.get("synthesis_failed", False):
             has_placeholders = True
             break
         for metric in sample.get("metrics", []):
-            if metric.get("status") == "missing_backend" or "proxy" in metric.get("name", ""):
+            if metric.get("status") in {"missing_backend", "synthesis_failed"} or "proxy" in metric.get("name", ""):
                 has_placeholders = True
                 break
 
@@ -96,8 +96,8 @@ def render_markdown_report(manifest: dict) -> str:
     lines += ["", "## Notes", ""]
     if has_placeholders:
         lines += [
-            "Metric values in this scaffold are deterministic placeholders. Treat them as pipeline checks, not scientific measurements.",
-            "Replace each placeholder with the corresponding ASR, speaker-verification, LID, leakage-probe, or SER backend before drawing conclusions.",
+            "Some metric values are placeholders or were skipped after synthesis failures. Treat affected rows as pipeline checks, not scientific measurements.",
+            "Replace placeholder metrics with real backends and inspect synthesis_failed rows before drawing conclusions.",
         ]
     else:
         lines += [

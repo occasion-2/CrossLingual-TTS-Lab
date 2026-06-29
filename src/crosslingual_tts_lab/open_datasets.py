@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import wave
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,6 +46,10 @@ def build_common_voice_config(
     model_backend: str,
     model_params: dict[str, str],
     include_mono_lingual: bool,
+    utterances_per_speaker: int = 1,
+    max_voice_chars: int | None = None,
+    max_target_chars: int | None = None,
+    min_target_chars: int | None = None,
 ) -> Path:
     try:
         from datasets import Audio, load_dataset
@@ -66,20 +71,40 @@ def build_common_voice_config(
                 f"Could not access {dataset_name!r} on Hugging Face. Mozilla Common Voice "
                 "datasets on Hugging Face are now placeholder/empty repos after the move "
                 "to Mozilla Data Collective. Use `xttslab dataset fleurs` for an open "
-                "Hugging Face dataset, or download Common Voice manually and build a local "
-                "config."
+                "Hugging Face dataset, or download Common Voice manually and run "
+                "`xttslab dataset common-voice --local-root /path/to/cv-corpus ...`."
             ) from exc
         if "audio" in dataset.column_names:
             dataset = dataset.cast_column("audio", Audio(decode=True))
 
-        selected_voices = _select_voice_rows(dataset, voices_per_language)
-        selected_targets = _select_target_rows(dataset, targets_per_language)
+        if utterances_per_speaker > 1:
+            selected_voices = _select_speaker_voice_rows(
+                dataset,
+                speakers_limit=voices_per_language,
+                utterances_per_speaker=utterances_per_speaker,
+                language=language.benchmark_code,
+                max_chars=max_voice_chars,
+            )
+        else:
+            selected_voices = _select_voice_rows(
+                dataset,
+                voices_per_language,
+                language.benchmark_code,
+                max_voice_chars,
+            )
+        selected_targets = _select_target_rows(
+            dataset,
+            targets_per_language,
+            language.benchmark_code,
+            max_chars=max_target_chars,
+            min_chars=min_target_chars,
+        )
 
         for index, row in enumerate(selected_voices, start=1):
             audio_path = _audio_path(row)
             if audio_path is None:
                 continue
-            speaker_id = str(row.get("client_id") or f"{language.dataset_code}-speaker-{index:03d}")
+            speaker_id = _speaker_id(row, f"{language.dataset_code}-speaker-{index:03d}")
             voices.append(
                 {
                     "id": f"cv_{language.benchmark_code}_voice_{index:03d}",
@@ -91,6 +116,7 @@ def build_common_voice_config(
                         "dataset": dataset_name,
                         "dataset_language": language.dataset_code,
                         "split": split,
+                        "source": "common_voice",
                     },
                 }
             )
@@ -108,6 +134,7 @@ def build_common_voice_config(
                         "dataset": dataset_name,
                         "dataset_language": language.dataset_code,
                         "split": split,
+                        "source": "common_voice",
                     },
                 }
             )
@@ -118,6 +145,120 @@ def build_common_voice_config(
         description=(
             "Open-data Common Voice slice for cross-lingual voice-language "
             "disentanglement experiments."
+        ),
+        models=[{"id": model_id, "backend": model_backend, "params": model_params}],
+        metrics=_real_metric_specs(),
+        voices=voices,
+        targets=targets,
+        pairs=pairs,
+    )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(config_text, encoding="utf-8")
+    return out_path
+
+
+def build_local_common_voice_config(
+    *,
+    out_path: Path,
+    local_root: Path,
+    languages: list[LanguageRequest],
+    split: str,
+    voices_per_language: int,
+    targets_per_language: int,
+    model_id: str,
+    model_backend: str,
+    model_params: dict[str, str],
+    include_mono_lingual: bool,
+    utterances_per_speaker: int = 1,
+    max_voice_chars: int | None = None,
+    max_target_chars: int | None = None,
+    min_target_chars: int | None = None,
+) -> Path:
+    voices: list[dict[str, Any]] = []
+    targets: list[dict[str, Any]] = []
+    local_root = local_root.resolve()
+
+    for language in languages:
+        rows = _load_local_common_voice_rows(local_root, language.dataset_code, split)
+        if utterances_per_speaker > 1:
+            selected_voices = _select_speaker_voice_rows(
+                rows,
+                speakers_limit=voices_per_language,
+                utterances_per_speaker=utterances_per_speaker,
+                language=language.benchmark_code,
+                max_chars=max_voice_chars,
+            )
+        else:
+            selected_voices = _select_voice_rows(
+                rows,
+                voices_per_language,
+                language.benchmark_code,
+                max_voice_chars,
+            )
+        selected_targets = _select_target_rows(
+            rows,
+            targets_per_language,
+            language.benchmark_code,
+            max_chars=max_target_chars,
+            min_chars=min_target_chars,
+        )
+
+        if not selected_voices:
+            raise RuntimeError(
+                f"no usable Common Voice reference utterances found for {language.dataset_code!r} "
+                f"under {local_root}; check split={split!r}, clips/, and utterances-per-speaker"
+            )
+        if not selected_targets:
+            raise RuntimeError(
+                f"no usable Common Voice target text found for {language.dataset_code!r} "
+                f"under {local_root}; check split={split!r}"
+            )
+
+        for index, row in enumerate(selected_voices, start=1):
+            audio_path = _audio_path(row)
+            if audio_path is None:
+                continue
+            speaker_id = _speaker_id(row, f"{language.dataset_code}-speaker-{index:03d}")
+            voices.append(
+                {
+                    "id": f"cv_{language.benchmark_code}_voice_{index:03d}",
+                    "language": language.benchmark_code,
+                    "speaker_id": speaker_id,
+                    "audio_path": str(audio_path),
+                    "transcript": _normalize_text(language.benchmark_code, _row_text(row)),
+                    "metadata": {
+                        "dataset": "local-common-voice",
+                        "dataset_language": language.dataset_code,
+                        "split": split,
+                        "source": "common_voice_local",
+                    },
+                }
+            )
+
+        for index, row in enumerate(selected_targets, start=1):
+            text = _normalize_text(language.benchmark_code, _row_text(row))
+            if not text:
+                continue
+            targets.append(
+                {
+                    "id": f"cv_{language.benchmark_code}_target_{index:03d}",
+                    "language": language.benchmark_code,
+                    "text": text,
+                    "metadata": {
+                        "dataset": "local-common-voice",
+                        "dataset_language": language.dataset_code,
+                        "split": split,
+                        "source": "common_voice_local",
+                    },
+                }
+            )
+
+    pairs = _build_pairs(voices, targets, include_mono_lingual)
+    config_text = render_benchmark_toml(
+        name="local-common-voice-crosslingual",
+        description=(
+            "Local Common Voice slice with known speaker IDs for cross-lingual "
+            "voice-language disentanglement and speaker calibration."
         ),
         models=[{"id": model_id, "backend": model_backend, "params": model_params}],
         metrics=_real_metric_specs(),
@@ -146,6 +287,7 @@ def build_fleurs_config(
     target_languages: set[str] | None = None,
     max_voice_chars: int | None = None,
     max_target_chars: int | None = None,
+    min_target_chars: int | None = None,
 ) -> Path:
     try:
         from datasets import Audio, load_dataset
@@ -172,7 +314,13 @@ def build_fleurs_config(
             else []
         )
         selected_targets = (
-            _select_target_rows(dataset, targets_per_language, language.benchmark_code, max_target_chars)
+            _select_target_rows(
+                dataset,
+                targets_per_language,
+                language.benchmark_code,
+                max_chars=max_target_chars,
+                min_chars=min_target_chars,
+            )
             if include_targets
             else []
         )
@@ -300,12 +448,15 @@ def _select_target_rows(
     limit: int,
     language: str | None = None,
     max_chars: int | None = None,
+    min_chars: int | None = None,
 ) -> list[dict[str, Any]]:
     selected: list[dict[str, Any]] = []
     seen_texts: set[str] = set()
     for row in dataset:
         text = _normalize_text(language or "", _row_text(row))
         if not text or text in seen_texts:
+            continue
+        if min_chars is not None and len(text) < min_chars:
             continue
         if max_chars is not None and len(text) > max_chars:
             continue
@@ -314,6 +465,113 @@ def _select_target_rows(
         if len(selected) >= limit:
             break
     return selected
+
+
+def _select_speaker_voice_rows(
+    dataset: Any,
+    *,
+    speakers_limit: int,
+    utterances_per_speaker: int,
+    language: str | None = None,
+    max_chars: int | None = None,
+) -> list[dict[str, Any]]:
+    by_speaker: dict[str, list[dict[str, Any]]] = {}
+    speaker_order: list[str] = []
+    selected: list[dict[str, Any]] = []
+
+    for row in dataset:
+        speaker = _speaker_id(row, "")
+        if not speaker:
+            continue
+        sentence = _normalize_text(language or "", _row_text(row))
+        if not sentence or _audio_path(row) is None:
+            continue
+        if max_chars is not None and len(sentence) > max_chars:
+            continue
+        if speaker not in by_speaker:
+            by_speaker[speaker] = []
+            speaker_order.append(speaker)
+        if len(by_speaker[speaker]) < utterances_per_speaker:
+            by_speaker[speaker].append(dict(row))
+
+    for speaker in speaker_order:
+        rows = by_speaker[speaker]
+        if len(rows) < utterances_per_speaker:
+            continue
+        selected.extend(rows[:utterances_per_speaker])
+        if len(selected) >= speakers_limit * utterances_per_speaker:
+            break
+
+    return selected
+
+
+def _load_local_common_voice_rows(local_root: Path, dataset_code: str, split: str) -> list[dict[str, Any]]:
+    language_root, tsv_path = _local_common_voice_paths(local_root, dataset_code, split)
+    rows: list[dict[str, Any]] = []
+    with tsv_path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        for row in reader:
+            audio_path = _local_common_voice_audio_path(language_root, row.get("path", ""))
+            if audio_path is None:
+                continue
+            normalized = dict(row)
+            normalized["audio"] = {"path": str(audio_path)}
+            normalized["path"] = str(audio_path)
+            rows.append(normalized)
+    return rows
+
+
+def _local_common_voice_paths(local_root: Path, dataset_code: str, split: str) -> tuple[Path, Path]:
+    codes = [dataset_code]
+    alias = _common_voice_locale_alias(dataset_code)
+    if alias not in codes:
+        codes.append(alias)
+
+    candidates: list[tuple[Path, Path]] = []
+    for code in codes:
+        language_root = local_root / code
+        candidates.append((language_root, language_root / f"{split}.tsv"))
+        candidates.append((language_root, language_root / f"{split.replace('-', '_')}.tsv"))
+    candidates.append((local_root, local_root / f"{split}.tsv"))
+    candidates.append((local_root, local_root / f"{split.replace('-', '_')}.tsv"))
+
+    for language_root, tsv_path in candidates:
+        if tsv_path.exists():
+            return language_root, tsv_path
+
+    tried = ", ".join(str(path) for _, path in candidates)
+    raise RuntimeError(
+        f"could not find Common Voice split {split!r} for {dataset_code!r} under {local_root}; tried: {tried}"
+    )
+
+
+def _local_common_voice_audio_path(language_root: Path, raw_path: str) -> Path | None:
+    if not raw_path:
+        return None
+    path = Path(raw_path)
+    candidates = []
+    if path.is_absolute():
+        candidates.append(path)
+    else:
+        candidates.append(language_root / path)
+        candidates.append(language_root / "clips" / path)
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate.resolve()
+    return None
+
+
+def _common_voice_locale_alias(code: str) -> str:
+    aliases = {
+        "zh-cn": "zh-CN",
+        "zh": "zh-CN",
+        "cmn": "zh-CN",
+        "en-us": "en",
+        "en_us": "en",
+        "ru-ru": "ru",
+        "ru_ru": "ru",
+    }
+    return aliases.get(code.casefold(), code)
 
 
 def _audio_path(row: dict[str, Any]) -> Path | None:
@@ -387,6 +645,14 @@ def _row_text(row: dict[str, Any]) -> str:
         if value:
             return str(value).strip()
     return ""
+
+
+def _speaker_id(row: dict[str, Any], fallback: str) -> str:
+    for key in ("client_id", "speaker_id", "speaker", "reader_id", "user_id"):
+        value = row.get(key)
+        if value:
+            return str(value)
+    return fallback
 
 
 def _normalize_text(language: str, text: str) -> str:

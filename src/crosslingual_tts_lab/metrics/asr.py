@@ -149,14 +149,19 @@ class FasterWhisperLIDMetric(_FasterWhisperMetricBase):
             detected = getattr(info, "language", None)
             probability = getattr(info, "language_probability", None)
             target = sample.job.target.language
+            matches_target = detected == target
+            detected_probability = _round_or_none(probability)
+            target_probability = detected_probability if matches_target else 0.0
             return MetricResult(
                 name=self.name,
                 status="ok",
-                value=_round_or_none(probability),
+                value=target_probability,
                 details={
                     "target_language": target,
                     "detected_language": detected,
-                    "matches_target": detected == target,
+                    "matches_target": matches_target,
+                    "detected_language_probability": detected_probability,
+                    "target_language_probability": target_probability,
                     "model_size": self._model_size(),
                     "device": self._device(),
                     "compute_type": self._compute_type(),
