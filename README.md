@@ -1,6 +1,6 @@
 # CrossLingual TTS Lab
 
-CrossLingual TTS Lab is a benchmark harness for evaluating cross-lingual zero-shot voice cloning, focusing on target-language intelligibility, target-language identification, speaker preservation, and source-language leakage.
+CrossLingual TTS Lab is a benchmark harness for cross-lingual zero-shot voice cloning. It tracks target-text intelligibility, target-language identification, speaker similarity, and a source-language leakage proxy.
 
 Core question:
 
@@ -8,7 +8,7 @@ Core question:
 > the model preserve speaker identity without leaking source-language accent,
 > phonetics, or prosody into the target language?
 
-The harness started as a lightweight `uv` project with a config-driven run planner, a dummy synthesis backend, pluggable model/metric interfaces, and machine-readable plus Markdown reports. It now includes several real TTS backends, metric adapters, and a source-language leakage probe, while SER-based emotion preservation metrics remain a future extension.
+The project is a `uv` workspace with a config-driven planner, model and metric backends, resumable synthesis, and JSON/Markdown reports. It includes dummy and real TTS backends, ASR/LID/speaker metrics, and an embedding-space leakage probe. SER-based emotion metrics are not implemented yet.
 
 ## Quick Start
 
@@ -164,7 +164,7 @@ CosyVoice isolated virtual environment (`overnight_runs/.venv_cosyvoice`) explic
 `nvidia-cudnn-cu12` because the CosyVoice backend uses ONNX Runtime GPU, which requires it.
 ## Running the FLEURS Benchmark Experiment
 
-To evaluate multiple model backends cleanly without PyTorch/CUDA dependency poisoning, run the automated experiment pipeline:
+To run the multi-model FLEURS experiment, use the wrapper script. It keeps each model in its own virtual environment because the model stacks require different CUDA/PyTorch packages.
 
 1. **Install system prerequisites** (e.g. `sox` is required by Qwen-TTS):
    ```bash
@@ -178,13 +178,13 @@ To evaluate multiple model backends cleanly without PyTorch/CUDA dependency pois
     This will clone the `CosyVoice` and `Spark-TTS` repositories locally and download the 2GB Spark-TTS pre-trained weights.
 
 3. **Install Python dependencies for specific backends**:
-   All model backend dependencies are cleanly separated into optional-dependencies (extras) inside [pyproject.toml](pyproject.toml). You can install the dependencies of your choice directly into your active virtual environment:
+   Backend dependencies are split into optional extras in [pyproject.toml](pyproject.toml). Install only the stack you need if you are running a single model:
 
-   * **Using the Helper Script** (checks for `uv` or `pip` automatically):
+   * **Using the helper script**:
      - For CosyVoice: `./install_dependencies.sh --cosyvoice`
      - For Spark-TTS: `./install_dependencies.sh --spark-tts`
 
-   * **Installing Manually**:
+   * **Installing manually**:
      - **XTTS**: `uv pip install -e ".[open-data,metrics,tts]"`
      - **F5-TTS**: `uv pip install -e ".[open-data,metrics,f5]"`
      - **Qwen-TTS**: `uv pip install -e ".[open-data,metrics,qwen]"`
@@ -199,24 +199,24 @@ To evaluate multiple model backends cleanly without PyTorch/CUDA dependency pois
    ```bash
    ./run_fleurs_experiment_example.sh
    ```
-   This script automatically configures isolated virtual environments for each model (under `overnight_runs/`), handles their incompatible CUDA/PyTorch package resolutions, plans the FLEURS slice, synthesizes the audio, and scores metrics.
+   This creates model-specific virtual environments under `overnight_runs/`, generates the FLEURS configs, synthesizes audio, and scores the metrics.
 
-5. **WAV-level Resumability**:
-   If a run gets interrupted or fails for one model, running `./run_fleurs_experiment_example.sh` again will instantly skip completed models (based on `report.md`) and skip already-synthesized WAV files, resuming right from the point of failure.
+5. **WAV-level resumability**:
+   If a run stops, rerun `./run_fleurs_experiment_example.sh`. Completed models are skipped when `report.md` exists, and existing WAV files are reused.
 
 ### Common Voice Speaker Calibration Run
 
-FLEURS is still the main direction-aware benchmark used in the paper tables, but its speaker labels are not strong enough for ground-truth same-speaker calibration. To get stronger speaker-similarity bounds, run the Common Voice companion script:
+FLEURS is the main direction-aware benchmark used in the paper tables. Its speaker labels are not enough for a ground-truth same-speaker calibration, so the speaker-similarity bounds come from a Common Voice companion run:
 
 ```bash
 ./run_common_voice_calibration.sh
 ```
 
-This script builds Common Voice configs with repeated reference utterances per known `client_id`/`speaker_id`, runs the same isolated model stack under `overnight_runs_cv/`, and writes `calibration.md` for each model. The calibration command now prefers known same-speaker pairs when repeated speaker IDs are present, while retaining the older inferred FLEURS fallback for legacy runs.
+This builds Common Voice configs with repeated reference utterances per known `client_id`/`speaker_id`, runs the model stack under `overnight_runs_cv/`, and writes `calibration.md` for each model. The calibration command uses known repeated speaker IDs when they are present. The older inferred FLEURS fallback remains for legacy runs.
 
 Current `overnight_runs_cv/` snapshot: each full model run contains 600 cross-lingual jobs from 30 Common Voice prompts and 30 targets. F5-TTS, Qwen3-TTS 0.6B, Qwen3-TTS 1.7B, XTTS v2, and CosyVoice all completed 600 scored samples. Spark-TTS completed the 400 supported English/Chinese-target samples and records 200 expected placeholders for target-Russian directions.
 
-The speaker-calibration bounds now come from real Common Voice repeated-speaker IDs, not from inferred FLEURS pseudo-pairs:
+The calibration bounds now come from repeated Common Voice speaker IDs rather than inferred FLEURS pseudo-pairs:
 
 | Pair type | Speaker Sim |
 |---|---|
@@ -224,13 +224,13 @@ The speaker-calibration bounds now come from real Common Voice repeated-speaker 
 | different speaker same language | 0.104 ± 0.104 (n=120) |
 | different speaker cross-language | 0.081 ± 0.090 (n=300) |
 
-Generated-vs-wrong-reference sanity checks from the same run stay near the negative bounds: F5-TTS 0.042 ± 0.075 (n=600), Qwen3-TTS 0.6B 0.059 ± 0.068 (n=600), Qwen3-TTS 1.7B 0.052 ± 0.063 (n=600), XTTS v2 0.064 ± 0.070 (n=600), CosyVoice 0.078 ± 0.082 (n=600), and Spark-TTS 0.058 ± 0.079 (n=400).
+The generated-vs-wrong-reference checks from the same run are close to the different-speaker bounds: F5-TTS 0.042 ± 0.075 (n=600), Qwen3-TTS 0.6B 0.059 ± 0.068 (n=600), Qwen3-TTS 1.7B 0.052 ± 0.063 (n=600), XTTS v2 0.064 ± 0.070 (n=600), CosyVoice 0.078 ± 0.082 (n=600), and Spark-TTS 0.058 ± 0.079 (n=400).
 
 Common Voice is no longer usable through the old Hugging Face placeholder repos. The companion script now uses the official Mozilla Data Collective API to fetch the requested locale archives, then extracts only the selected `validated.tsv` rows and clips into `overnight_runs_cv/common_voice/`. Put your Mozilla Data Collective key in `.env` as `COMMONVOICE_APIKEY=...` or set that environment variable before running the script. The parser also accepts spaced `.env` assignments such as `COMMONVOICE_APIKEY = ...`.
 
 Mozilla Data Collective requires accepting the terms for each dataset before the API will issue a download URL. If the script reports a terms error, open the dataset URL in the message while signed in, accept the terms, and rerun the script.
 
-The official API currently returns full locale `.tar.gz` archives. The script caches those archives under `overnight_runs_cv/common_voice_archives/` and resumes interrupted downloads with HTTP range requests. If the connection drops, rerun the same command; it resumes the `.part` archive instead of restarting from byte zero. Set `CV_ARCHIVE_CACHE=/path/with/space` if the default run directory is not large enough for the official archives.
+The official API currently returns full locale `.tar.gz` archives. The script caches them under `overnight_runs_cv/common_voice_archives/` and resumes interrupted downloads with HTTP range requests. If the connection drops, rerun the same command; it continues from the `.part` archive. Set `CV_ARCHIVE_CACHE=/path/with/space` if the default run directory is too small.
 
 The default API dataset IDs cover the scripted-speech 26.0 `ru`, `en`, and `zh-CN` archives used by the calibration script. For other languages or releases, pass explicit MDC IDs:
 
@@ -246,7 +246,7 @@ If you already downloaded a local slice before changing the filter, rebuild it w
 CV_FORCE_COMMON_VOICE_DOWNLOAD=1 ./run_common_voice_calibration.sh
 ```
 
-The Common Voice config generator also filters out very short targets by default in the overnight script (`CV_MIN_TARGET_CHARS=4`). This avoids backend crashes on one-token targets such as `six` or `六`. If a run already produced configs with shorter targets, regenerate configs before rerunning:
+The Common Voice config generator filters out very short targets by default in the overnight script (`CV_MIN_TARGET_CHARS=4`). This avoids known backend failures on one-token targets such as `six` or `六`. If a run already produced configs with shorter targets, regenerate configs before rerunning:
 
 ```bash
 CV_FORCE_CONFIG=1 ./run_common_voice_calibration.sh
@@ -423,13 +423,18 @@ target = "en_weather"
 
 ## Benchmark Results on Google FLEURS
 
-The ASR evaluation uses target-language specific text-normalization adapters (preprocessors) to clean reference and hypothesis transcriptions (handling lowercase, removing punctuation, and stripping spaces for CJK characters) before computing WER/CER. 
+ASR evaluation uses target-language text normalizers before computing WER/CER. The normalizers lowercase where appropriate, remove punctuation, and strip spaces for CJK text.
 
-The benchmark harness is being evaluated on a cross-lingual subset of the Google FLEURS dataset generated by `run_fleurs_experiment_example.sh` across several state-of-the-art zero-shot voice cloning models. The real metrics stack includes `faster_whisper_asr` for ASR error (measuring target-language intelligibility), `faster_whisper_lid` for a conservative target-language identification score (detected-language confidence when the detected language matches the target, otherwise 0), `speechbrain_speaker_similarity` (ECAPA-TDNN) for speaker-similarity preservation, and `speechbrain_language_similarity` (VoxLingua107) to measure source-language leakage.
+The tables below come from the FLEURS slice generated by `run_fleurs_experiment_example.sh`. The metrics are:
 
-Below is the comparative summary of the cross-lingual generalization capabilities of the installed models.
+- `faster_whisper_asr` for target-text ASR error
+- `faster_whisper_lid` for a conservative target-language score: detected-language confidence if the detected language matches the target, otherwise 0
+- `speechbrain_speaker_similarity` for ECAPA-TDNN speaker similarity
+- `speechbrain_language_similarity` for the VoxLingua107 leakage proxy
 
-*Note: Lower ASR error indicates better target-text intelligibility under the chosen ASR and normalization pipeline. Higher Target LID score indicates the model was detected as the target language with high confidence. Higher Speaker Sim indicates stronger speaker-embedding similarity to the reference. Higher Leakage indicates the generated audio sounds more like the source language's accent/prosody.*
+The numbers are automatic metrics, not human preference or naturalness judgments.
+
+Lower ASR error is better. Higher Target LID score means the output was more confidently detected as the target language. Higher Speaker Sim means higher embedding similarity to the reference. Higher leakage delta means the generated audio is closer to the source-language centroid than to the target-language centroid under this proxy.
 
 ### Table 1: Common Target-Language Subset
 *Only `en` and `zh` target conditions. Excludes target-Russian directions to avoid unsupported/degraded model conditions. F5-TTS target-Russian results are reported in Table 4 for transparency but excluded from this table because the base F5 model is not expected to handle Russian target synthesis reliably.*
@@ -467,7 +472,7 @@ Below is the comparative summary of the cross-lingual generalization capabilitie
 | CosyVoice | zh | 200 | 23.5% [19.7–27.4] | 76.8% [71.8–81.9] | 0.657 [0.634–0.678] |
 | F5-TTS | zh | 200 | 50.5% [45.0–55.8] | 71.6% [65.8–77.6] | 0.451 [0.412–0.486] |
 
-**Interpretation:** Target-language aggregation shows that target Chinese is more difficult for most systems than target English or Russian. Qwen3-TTS remains the most balanced system, while XTTS is highly competitive for target English but degrades on target Chinese. F5-TTS collapses on target Russian, supporting the decision to separate full-coverage and common-subset comparisons.
+**Interpretation:** Target Chinese is harder for most systems than target English. Qwen3-TTS has the most even profile in this run. XTTS does better on target English than target Chinese. F5-TTS performs poorly on target Russian, so the common-subset table separates English/Chinese targets from full-coverage results.
 
 ### Table 3: Source-Language Aggregates (Speaker Similarity)
 *Aggregated by source language to show how well each model retains speaker identity across origin languages.*
@@ -493,7 +498,7 @@ Below is the comparative summary of the cross-lingual generalization capabilitie
 | CosyVoice | zh | 200 | 0.759 [0.744–0.773] |
 | F5-TTS | zh | 200 | 0.689 [0.679–0.699] |
 
-**Interpretation:** Source-language aggregation reveals that ECAPA speaker similarity depends strongly on the reference language, with English references producing remarkably lower similarity across several models compared to Chinese or Russian references. The Common Voice calibration table below now provides real-real same-speaker and different-speaker bounds for interpreting those scores instead of relying on FLEURS-only proxies.
+**Interpretation:** ECAPA speaker similarity depends on the reference language. In this run, English references produce lower similarity for several models than Chinese or Russian references. The Common Voice calibration table below gives real-real same-speaker and different-speaker bounds for reading these scores.
 
 ### Table 4: Per-Direction Breakdowns
 *Provides full visibility into specific language pairs, exposing asymmetric performance.*
@@ -537,63 +542,63 @@ Below is the comparative summary of the cross-lingual generalization capabilitie
 | F5-TTS | zh->en | 100 | 3.7% [2.3–5.2] | 95.5% [94.0–96.8] | 0.658 [0.643–0.673] |
 | F5-TTS | zh->ru | 100 | 146.3% [131.4–162.4] | 0.0% [0.0–0.0] | 0.721 [0.710–0.730] |
 
-**Interpretation:** Aggregate averages hide severe model-specific and direction-specific failures. Cross-lingual zero-shot voice cloning is highly direction-dependent. For example, while F5-TTS achieves an impressive 3.7% ASR Error on `zh->en`, it completely fails on `*->ru`. CosyVoice struggles with intelligibility in most cross-lingual pairs (e.g., 67.7% ASR Error for `zh->ru`), despite scoring the highest speaker similarity.
+**Interpretation:** Direction matters. F5-TTS is good on `zh->en` in this run but poor on target-Russian directions. CosyVoice has high speaker-similarity scores but weaker ASR/LID scores in several directions.
 
 ### Table 5: Pareto Ranking
-Better intelligibility / target-language transfer does **not** imply better speaker preservation. This tradeoff is evident across the models:
+Better intelligibility does not always come with higher speaker similarity. In this run:
 
-- **Best intelligibility**: Qwen3-TTS 1.7B
-- **Best target LID**: XTTS v2
-- **Best speaker similarity**: CosyVoice
-- **Best small model tradeoff**: Qwen3-TTS 0.6B
+- **Lowest ASR error**: Qwen3-TTS 1.7B
+- **Highest target LID score**: XTTS v2
+- **Highest speaker similarity**: CosyVoice
+- **Small model to compare against**: Qwen3-TTS 0.6B
 
 ### Table 6: Normalized Source-Language Leakage (Delta)
-*Difference between generated audio's cosine similarity to the source-language centroid vs the target-language centroid. Higher delta (> 0) means the audio sounds more like the source language than the target language.*
+*Difference between generated audio's cosine similarity to the source-language centroid and the target-language centroid. Higher delta (> 0) means the output is closer to the source-language centroid under this proxy.*
 
 | Model | Direction | n | Leakage Delta ↓ (95% CI) |
 |---|---|---|---|
 | F5-TTS | en->ru | 100 | 0.070 [0.062–0.079] |
-| F5-TTS | en->zh | 100 | -0.023 [-0.032–-0.015] |
-| F5-TTS | ru->en | 100 | -0.061 [-0.070–-0.052] |
-| F5-TTS | ru->zh | 100 | -0.054 [-0.060–-0.047] |
-| F5-TTS | zh->en | 100 | -0.051 [-0.057–-0.045] |
+| F5-TTS | en->zh | 100 | -0.023 [-0.032, -0.015] |
+| F5-TTS | ru->en | 100 | -0.061 [-0.070, -0.052] |
+| F5-TTS | ru->zh | 100 | -0.054 [-0.060, -0.047] |
+| F5-TTS | zh->en | 100 | -0.051 [-0.057, -0.045] |
 | F5-TTS | zh->ru | 100 | 0.109 [0.105–0.113] |
 | CosyVoice | en->ru | 100 | 0.045 [0.035–0.056] |
-| CosyVoice | en->zh | 100 | -0.034 [-0.039–-0.028] |
+| CosyVoice | en->zh | 100 | -0.034 [-0.039, -0.028] |
 | CosyVoice | ru->en | 100 | 0.001 [-0.008–0.009] |
 | CosyVoice | ru->zh | 100 | 0.018 [0.011–0.024] |
-| CosyVoice | zh->en | 100 | -0.008 [-0.013–-0.003] |
+| CosyVoice | zh->en | 100 | -0.008 [-0.013, -0.003] |
 | CosyVoice | zh->ru | 100 | 0.053 [0.045–0.061] |
-| Qwen3-TTS 0.6B | en->ru | 96 | -0.127 [-0.132–-0.121] |
-| Qwen3-TTS 0.6B | en->zh | 98 | -0.075 [-0.079–-0.071] |
-| Qwen3-TTS 0.6B | ru->en | 100 | -0.076 [-0.084–-0.070] |
-| Qwen3-TTS 0.6B | ru->zh | 100 | -0.086 [-0.091–-0.081] |
-| Qwen3-TTS 0.6B | zh->en | 99 | -0.032 [-0.037–-0.027] |
-| Qwen3-TTS 0.6B | zh->ru | 98 | -0.109 [-0.114–-0.104] |
-| Qwen3-TTS 1.7B | en->ru | 100 | -0.130 [-0.137–-0.124] |
-| Qwen3-TTS 1.7B | en->zh | 100 | -0.071 [-0.075–-0.067] |
-| Qwen3-TTS 1.7B | ru->en | 100 | -0.094 [-0.103–-0.086] |
-| Qwen3-TTS 1.7B | ru->zh | 100 | -0.088 [-0.093–-0.083] |
-| Qwen3-TTS 1.7B | zh->en | 100 | -0.053 [-0.058–-0.048] |
-| Qwen3-TTS 1.7B | zh->ru | 100 | -0.116 [-0.121–-0.111] |
-| Spark-TTS | en->zh | 100 | -0.050 [-0.054–-0.045] |
-| Spark-TTS | ru->en | 100 | -0.107 [-0.114–-0.101] |
-| Spark-TTS | ru->zh | 100 | -0.078 [-0.082–-0.073] |
-| Spark-TTS | zh->en | 100 | -0.035 [-0.039–-0.030] |
-| XTTS v2 | en->ru | 100 | -0.107 [-0.116–-0.100] |
-| XTTS v2 | en->zh | 100 | -0.063 [-0.067–-0.059] |
-| XTTS v2 | ru->en | 100 | -0.099 [-0.105–-0.092] |
-| XTTS v2 | ru->zh | 100 | -0.085 [-0.089–-0.080] |
-| XTTS v2 | zh->en | 100 | -0.032 [-0.038–-0.025] |
-| XTTS v2 | zh->ru | 100 | -0.085 [-0.092–-0.078] |
+| Qwen3-TTS 0.6B | en->ru | 96 | -0.127 [-0.132, -0.121] |
+| Qwen3-TTS 0.6B | en->zh | 98 | -0.075 [-0.079, -0.071] |
+| Qwen3-TTS 0.6B | ru->en | 100 | -0.076 [-0.084, -0.070] |
+| Qwen3-TTS 0.6B | ru->zh | 100 | -0.086 [-0.091, -0.081] |
+| Qwen3-TTS 0.6B | zh->en | 99 | -0.032 [-0.037, -0.027] |
+| Qwen3-TTS 0.6B | zh->ru | 98 | -0.109 [-0.114, -0.104] |
+| Qwen3-TTS 1.7B | en->ru | 100 | -0.130 [-0.137, -0.124] |
+| Qwen3-TTS 1.7B | en->zh | 100 | -0.071 [-0.075, -0.067] |
+| Qwen3-TTS 1.7B | ru->en | 100 | -0.094 [-0.103, -0.086] |
+| Qwen3-TTS 1.7B | ru->zh | 100 | -0.088 [-0.093, -0.083] |
+| Qwen3-TTS 1.7B | zh->en | 100 | -0.053 [-0.058, -0.048] |
+| Qwen3-TTS 1.7B | zh->ru | 100 | -0.116 [-0.121, -0.111] |
+| Spark-TTS | en->zh | 100 | -0.050 [-0.054, -0.045] |
+| Spark-TTS | ru->en | 100 | -0.107 [-0.114, -0.101] |
+| Spark-TTS | ru->zh | 100 | -0.078 [-0.082, -0.073] |
+| Spark-TTS | zh->en | 100 | -0.035 [-0.039, -0.030] |
+| XTTS v2 | en->ru | 100 | -0.107 [-0.116, -0.100] |
+| XTTS v2 | en->zh | 100 | -0.063 [-0.067, -0.059] |
+| XTTS v2 | ru->en | 100 | -0.099 [-0.105, -0.092] |
+| XTTS v2 | ru->zh | 100 | -0.085 [-0.089, -0.080] |
+| XTTS v2 | zh->en | 100 | -0.032 [-0.038, -0.025] |
+| XTTS v2 | zh->ru | 100 | -0.085 [-0.092, -0.078] |
 
-**Interpretation:** The relative leakage probe reveals a critical tradeoff in CosyVoice: its consistently high "Speaker Similarity" (from Table 1/2) is directly correlated with high source-language leakage (often delta > 0, meaning it sounds closer to the source language than the target language). It achieves high speaker embedding scores by refusing to fully adapt to target-language phonetics, explaining its poor intelligibility. In contrast, Qwen3-TTS successfully shifts its audio distribution toward the target language (delta < 0) while maintaining strong intelligibility, suggesting better separation between voice identity and source-language acoustic cues under this probe.
+**Interpretation:** CosyVoice combines high speaker-similarity scores with positive or near-zero leakage deltas in several directions. That pattern may mean the speaker embedding score is partly capturing source-language acoustic cues. Qwen3-TTS has consistently negative leakage deltas in this run while also keeping ASR error low.
 
 ### Leakage Metric Caveat
-The current leakage score is an embedding-based proxy using VoxLingua107 space normalized against FLEURS language centroids. While directional trends are clear, future work will validate it against human accent/prosody judgments.
+The leakage score is an embedding-based proxy using VoxLingua107 space normalized against FLEURS language centroids. It still needs human accent/prosody validation.
 
 ### Table 7: Speaker-Similarity Calibration
-*Speaker similarity requires calibration against ground-truth positive/negative bounds to fully disentangle voice preservation from channel or language artifacts. The following bounds are extracted from `overnight_runs_cv/`, using known repeated Common Voice `client_id`/`speaker_id` values rather than inferred FLEURS pseudo-pairs:*
+*Speaker similarity needs calibration because embedding scores can move with channel, language, and speaker identity. These bounds come from `overnight_runs_cv/`, using repeated Common Voice `client_id`/`speaker_id` values rather than inferred FLEURS pseudo-pairs:*
 
 | Pair type | Speaker Sim |
 |---|---|
@@ -609,31 +614,28 @@ The current leakage score is an embedding-based proxy using VoxLingua107 space n
 
 Note: same-speaker cross-language calibration is still `N/A` in this Common Voice slice because the available repeated speaker IDs are within locale, not across languages.
 
-**Interpretation:** The calibration matrix now gives a real-real same-speaker bound from known Common Voice IDs: ECAPA-TDNN places repeated same-speaker utterances around ~0.64, while different-speaker pairs sit near ~0.10 or below. The `generated vs wrong reference` checks remain close to those negative bounds across all models, which is a useful sanity check against trivial score inflation. CosyVoice’s high FLEURS speaker similarity should therefore be treated as a plausible voice-preservation signal relative to calibrated bounds, not as proof of ground-truth identity preservation.
+**Interpretation:** The calibration table gives a same-speaker real-real bound from known Common Voice IDs: repeated same-speaker utterances average about 0.64, while different-speaker pairs are near 0.10 or below. The `generated vs wrong reference` checks are also near the negative bounds. CosyVoice’s high FLEURS speaker similarity should be read against those bounds, but it is still an automatic metric rather than proof of perceived identity preservation.
 
-### Future Work: TASLP Methodological Improvements
-To rigorously validate speaker similarity and phonetic disentanglement for peer-reviewed publication, the following validation remains:
+## Current Status
 
-| Needed | Why |
-|---|---|
-| human accent/nativeness labels | validates the leakage proxy |
+Implemented model backends:
 
-## Completed Integrations
+- **F5-TTS** (`F5TTSBackend` / `f5_tts`)
+- **XTTS/Coqui** (`CoquiXTTSBackend` / `coqui_xtts` / `xtts`)
+- **CosyVoice** (`CosyVoiceBackend` / `cosyvoice`)
+- **Spark-TTS** (`SparkTTSBackend` / `spark_tts`)
 
-1. **Real TTS Model Backends**:
-   - **F5-TTS** (`F5TTSBackend` / `f5_tts`): Official Python API integration.
-   - **XTTS/Coqui** (`CoquiXTTSBackend` / `coqui_xtts` / `xtts`): Multi-lingual clone support through the `TTS` API (patched for PyTorch 2.6).
-   - **CosyVoice** (`CosyVoiceBackend` / `cosyvoice`): Zero-shot cloning through FunASR/CosyVoice python API.
-   - **Spark-TTS** (`SparkTTSBackend` / `spark_tts`): Zero-shot cloning through the `SparkTTS` python API.
-   *(Note: Because these cutting-edge models have deeply conflicting CUDA and PyTorch dependencies, they cannot coexist in a single environment. The `./run_fleurs_experiment_example.sh` script automatically constructs perfectly isolated virtual environments for each model to safely run them without dependency crashes).*
-2. **ASR adapters per target language** to compute WER/CER:
-   - English, Russian, and Chinese (`zh`/`cmn`) specific normalizers in [text_metrics.py](src/crosslingual_tts_lab/text_metrics.py).
+Implemented metrics:
 
-## Next Integrations
+- target-text ASR error with faster-whisper
+- generated-audio language identification with faster-whisper
+- speaker similarity with SpeechBrain ECAPA-TDNN
+- source-language leakage proxy with SpeechBrain VoxLingua107 embeddings
+- English, Russian, and Chinese (`zh`/`cmn`) text normalizers in [text_metrics.py](src/crosslingual_tts_lab/text_metrics.py)
 
-The intended next pieces are:
+The model stacks use conflicting CUDA and PyTorch packages, so the FLEURS wrapper script creates one virtual environment per model under `overnight_runs/`.
 
-1. Add speaker-verification embeddings for speaker similarity. (Completed - uses SpeechBrain ECAPA-TDNN)
-2. Add LID inference on generated audio. (Completed - uses Faster Whisper LID)
-3. Add a source-language leakage probe trained on generated audio embeddings while controlling for target language. (Completed - uses SpeechBrain VoxLingua107 embeddings)
-4. Add optional emotion preservation metrics from SER models and emotion-labeled subsets.
+Not implemented:
+
+- human listening labels for accent, nativeness, and perceived speaker similarity
+- optional emotion-preservation metrics from SER models and emotion-labeled subsets
