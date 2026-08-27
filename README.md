@@ -450,16 +450,18 @@ The manifests attest the evaluator aliases and actual per-sample execution modes
 First validate the complete paper subset and both generated/reference WAV inventories without loading evaluator models:
 
 ```bash
-uv run --extra metrics python rescore_paper_evaluators.py \
+.venv/bin/python -u rescore_paper_evaluators.py \
   --source-root overnight_runs \
   --output-root paper_evaluator_rescore \
   --dry-run \
   --skip-runtime-checks
 ```
 
-Then omit the two dry-run flags to score on CUDA. The profile requires faster-whisper `medium` at the pinned revision with CUDA/float16 (ASR beam 5, LID beam 1), disables CPU fallback, and pins both SpeechBrain evaluator revisions. It writes new manifests and reports under `paper_evaluator_rescore/`; historical `overnight_runs/results_*/manifest.json` files and WAVs remain read-only inputs. Existing destination manifests are refused unless `--overwrite` is explicitly supplied. The completed manifests record the evaluator profile, exact package versions, source-manifest hashes, and separate generated/reference WAV inventory hashes.
+Then omit the two dry-run flags and add `--resume` to score on CUDA. The profile requires faster-whisper `medium` at the pinned revision with CUDA/float16 (ASR beam 5, LID beam 1), disables CPU fallback, and pins both SpeechBrain evaluator revisions. It writes new manifests and reports under `paper_evaluator_rescore/`; historical `overnight_runs/results_*/manifest.json` files and WAVs remain read-only inputs. Existing destination manifests are refused unless `--overwrite` is explicitly supplied. The completed manifests record the evaluator profile, exact package versions, source-manifest hashes, and separate generated/reference WAV inventory hashes.
 
-If scoring is interrupted, rerun with `--resume`. The script first downloads the three exact evaluator revisions sequentially, then reuses only rows whose complete metric status and evaluator details exactly match the pinned profile. Invalid or missing rows are rescored into a temporary manifest, merged in planned order, fully validated, and atomically installed. A fully validated completed model is skipped. `--resume` and `--overwrite` are mutually exclusive.
+Each of the four metrics runs in its own spawned process, so the two faster-whisper models and two SpeechBrain models never remain resident on the GPU together. A completed pass is strictly validated and attested under `paper_evaluator_rescore/results_*/.metric-passes/` before the next process starts; process exit provides a hard CUDA-memory teardown. The four pass results are merged by job ID in canonical metric order, fully validated, and atomically installed as the model manifest. Audio is never truncated and evaluator errors do not trigger CPU fallback.
+
+If scoring is interrupted, rerun the same command with `--resume`. The script reuses completed model manifests and exact, validated per-metric pass manifests; an invalid or failed pass is rerun without discarding earlier valid passes. `--resume` and `--overwrite` are mutually exclusive. Do not use plain `uv run` for this command because it may attempt to resolve unrelated synthesis extras such as FlashAttention; if the existing environment must be launched through uv, use `uv run --no-sync rescore_paper_evaluators.py ...`.
 
 ## Benchmark Results on Google FLEURS
 

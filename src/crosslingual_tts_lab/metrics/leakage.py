@@ -16,11 +16,17 @@ class SpeechBrainLanguageSimilarityMetric:
     device_profile: DeviceProfile
     _classifier: Any = field(default=None, init=False, repr=False)
 
+    @property
+    def output_name(self) -> str:
+        """Return the public metric name for every outcome, including errors."""
+
+        return "normalized_leakage_delta"
+
     def evaluate(self, sample: GeneratedSample) -> MetricResult:
         reference = sample.job.voice.audio_path
         if not reference.exists():
             return MetricResult(
-                name=self.name,
+                name=self.output_name,
                 status="error",
                 value=None,
                 details={
@@ -32,7 +38,7 @@ class SpeechBrainLanguageSimilarityMetric:
         try:
             sim_src, sim_tgt, delta = self._calculate_delta(sample)
             return MetricResult(
-                name="normalized_leakage_delta",
+                name=self.output_name,
                 status="ok",
                 value=round(delta, 6),
                 details={
@@ -45,7 +51,7 @@ class SpeechBrainLanguageSimilarityMetric:
             )
         except ModuleNotFoundError as exc:
             return MetricResult(
-                name=self.name,
+                name=self.output_name,
                 status="missing_backend",
                 value=None,
                 details={
@@ -55,7 +61,7 @@ class SpeechBrainLanguageSimilarityMetric:
             )
         except Exception as exc:
             return MetricResult(
-                name=self.name,
+                name=self.output_name,
                 status="error",
                 value=None,
                 details={
