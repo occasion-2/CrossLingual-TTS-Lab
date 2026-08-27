@@ -11,6 +11,7 @@ uv.lock
 configs/*
 !configs/mini.toml
 !configs/models_real.template.toml
+!configs/paper_model_snapshot.toml
 runs/
 .env
 .agents

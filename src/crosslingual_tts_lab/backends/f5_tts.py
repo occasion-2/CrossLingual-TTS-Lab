@@ -16,6 +16,8 @@ class F5TTSBackend:
     params: dict[str, Any] = field(default_factory=dict)
     name: str = "f5_tts"
     _model: Any = field(default=None, init=False, repr=False)
+    _checkpoint_path: str | None = field(default=None, init=False, repr=False)
+    _vocoder_path: str | None = field(default=None, init=False, repr=False)
 
     def synthesize(self, job: GenerationJob, output_dir: Path) -> SynthesisResult:
         if not job.voice.audio_path.exists():
@@ -52,6 +54,16 @@ class F5TTSBackend:
                 "ref_text_mode": self.params.get("ref_text_mode", "transcript"),
                 "target_language": job.target.language,
                 "device": self._device(),
+                "checkpoint": self.params.get(
+                    "checkpoint",
+                    "SWivid/F5-TTS/F5TTS_v1_Base/model_1250000.safetensors",
+                ),
+                "checkpoint_revision": self.params.get("checkpoint_revision"),
+                "resolved_checkpoint_path": self._checkpoint_path or None,
+                "vocoder": self.params.get("vocoder_repo", "charactr/vocos-mel-24khz"),
+                "vocoder_revision": self.params.get("vocoder_revision"),
+                "resolved_vocoder_path": self._vocoder_path or None,
+                "inference_config": self._inference_config(),
                 "synthetic_placeholder": False,
             },
         )
@@ -73,15 +85,70 @@ class F5TTSBackend:
 
             self._model = F5TTS(
                 model=self._model_name(),
-                ckpt_file=str(self.params.get("ckpt_file", "")),
+                ckpt_file=self._resolve_checkpoint_file(),
                 vocab_file=str(self.params.get("vocab_file", "")),
                 ode_method=str(self.params.get("ode_method", "euler")),
                 use_ema=bool(self.params.get("use_ema", True)),
-                vocoder_local_path=self.params.get("vocoder_local_path"),
+                vocoder_local_path=self._resolve_vocoder_path(),
                 device=self._device(),
                 hf_cache_dir=self.params.get("hf_cache_dir"),
             )
         return self._model
+
+    def _resolve_checkpoint_file(self) -> str:
+        if self._checkpoint_path is not None:
+            return self._checkpoint_path
+
+        explicit_path = str(self.params.get("ckpt_file", ""))
+        revision = self.params.get("checkpoint_revision")
+        if explicit_path:
+            self._checkpoint_path = explicit_path
+        elif revision:
+            try:
+                from huggingface_hub import hf_hub_download
+            except ModuleNotFoundError as exc:
+                raise RuntimeError(
+                    "a pinned F5-TTS checkpoint requires the 'huggingface-hub' package"
+                ) from exc
+            self._checkpoint_path = hf_hub_download(
+                repo_id=str(self.params.get("checkpoint_repo", "SWivid/F5-TTS")),
+                filename=str(
+                    self.params.get(
+                        "checkpoint_file",
+                        "F5TTS_v1_Base/model_1250000.safetensors",
+                    )
+                ),
+                revision=str(revision),
+                cache_dir=self.params.get("hf_cache_dir"),
+            )
+        else:
+            # Preserve upstream behavior when no immutable revision was asked
+            # for; F5TTS resolves its default alias itself.
+            self._checkpoint_path = ""
+        return self._checkpoint_path
+
+    def _resolve_vocoder_path(self) -> str | None:
+        if self._vocoder_path is not None:
+            return self._vocoder_path or None
+        explicit_path = self.params.get("vocoder_local_path")
+        revision = self.params.get("vocoder_revision")
+        if explicit_path:
+            self._vocoder_path = str(explicit_path)
+        elif revision:
+            try:
+                from huggingface_hub import snapshot_download
+            except ModuleNotFoundError as exc:
+                raise RuntimeError(
+                    "a pinned F5-TTS vocoder requires the 'huggingface-hub' package"
+                ) from exc
+            self._vocoder_path = snapshot_download(
+                repo_id=str(self.params.get("vocoder_repo", "charactr/vocos-mel-24khz")),
+                revision=str(revision),
+                cache_dir=self.params.get("hf_cache_dir"),
+            )
+        else:
+            self._vocoder_path = ""
+        return self._vocoder_path or None
 
     def _reference_text(self, job: GenerationJob) -> str:
         mode = str(self.params.get("ref_text_mode", "transcript"))
@@ -96,6 +163,19 @@ class F5TTSBackend:
 
     def _device(self) -> str:
         return str(self.params.get("device") or detect_device_profile().device)
+
+    def _inference_config(self) -> dict[str, Any]:
+        return {
+            "ref_text_mode": str(self.params.get("ref_text_mode", "transcript")),
+            "nfe_step": int(self.params.get("nfe_step", 32)),
+            "cfg_strength": float(self.params.get("cfg_strength", 2.0)),
+            "sway_sampling_coef": float(self.params.get("sway_sampling_coef", -1.0)),
+            "speed": float(self.params.get("speed", 1.0)),
+            "remove_silence": bool(self.params.get("remove_silence", False)),
+            "seed": self.params.get("seed"),
+            "ode_method": str(self.params.get("ode_method", "euler")),
+            "use_ema": bool(self.params.get("use_ema", True)),
+        }
 
 
 def _quiet(*args: Any, **kwargs: Any) -> None:

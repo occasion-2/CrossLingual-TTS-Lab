@@ -22,7 +22,11 @@ from crosslingual_tts_lab.open_datasets import (
 from crosslingual_tts_lab.planner import plan_jobs
 from crosslingual_tts_lab.report import write_reports
 from crosslingual_tts_lab.runner import run_benchmark, score_existing_run
-from crosslingual_tts_lab.calibration import compute_calibration
+from crosslingual_tts_lab.calibration import (
+    DEFAULT_SPEAKER_MODEL_ID,
+    DEFAULT_SPEAKER_MODEL_REVISION,
+    compute_calibration,
+)
 
 
 MINI_CONFIG = """name = "mini-ru-crosslingual"
@@ -222,6 +226,15 @@ def main(argv: list[str] | None = None) -> int:
 
     calibrate_parser = subparsers.add_parser("calibrate", help="compute speaker similarity calibration baselines")
     calibrate_parser.add_argument("--run", type=Path, required=True)
+    calibrate_parser.add_argument(
+        "--model-id",
+        default=DEFAULT_SPEAKER_MODEL_ID,
+    )
+    calibrate_parser.add_argument(
+        "--model-revision",
+        default=DEFAULT_SPEAKER_MODEL_REVISION,
+    )
+    calibrate_parser.add_argument("--device", default="cuda:0")
 
     args = parser.parse_args(argv)
 
@@ -246,7 +259,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "report":
         return _report(args.run)
     if args.command == "calibrate":
-        return _calibrate(args.run)
+        return _calibrate(args.run, args.model_id, args.model_revision, args.device)
     raise AssertionError(f"unhandled command {args.command}")
 
 
@@ -382,8 +395,8 @@ def _dataset_common_voice_download(args: argparse.Namespace) -> int:
     return 0
 
 
-def _parse_key_values(items: list[str]) -> dict[str, str]:
-    parsed: dict[str, str] = {}
+def _parse_key_values(items: list[str]) -> dict[str, object]:
+    parsed: dict[str, object] = {}
     for item in items:
         if "=" not in item:
             raise SystemExit(f"expected KEY=VALUE for --model-param, got {item!r}")
@@ -391,8 +404,24 @@ def _parse_key_values(items: list[str]) -> dict[str, str]:
         key = key.strip()
         if not key:
             raise SystemExit(f"empty key in --model-param {item!r}")
-        parsed[key] = value.strip()
+        parsed[key] = _parse_scalar(value.strip())
     return parsed
+
+
+def _parse_scalar(value: str) -> object:
+    normalized = value.casefold()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        return value
 
 
 def _parse_optional_csv(value: str | None) -> set[str] | None:
@@ -442,9 +471,14 @@ def _report(run_dir: Path) -> int:
     return 0
 
 
-def _calibrate(run_dir: Path) -> int:
+def _calibrate(run_dir: Path, model_id: str, model_revision: str, device: str) -> int:
     try:
-        compute_calibration(run_dir)
+        compute_calibration(
+            run_dir,
+            model_id=model_id,
+            model_revision=model_revision,
+            device=device,
+        )
     except Exception as exc:
         raise SystemExit(str(exc)) from exc
     return 0

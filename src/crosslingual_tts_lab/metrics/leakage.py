@@ -39,6 +39,7 @@ class SpeechBrainLanguageSimilarityMetric:
                     "sim_source_centroid": round(sim_src, 6),
                     "sim_target_centroid": round(sim_tgt, 6),
                     "model_id": self._model_id(),
+                    "model_revision": self._model_revision(),
                     "device": self._device(),
                 },
             )
@@ -109,15 +110,33 @@ class SpeechBrainLanguageSimilarityMetric:
                 from speechbrain.inference.speaker import EncoderClassifier
 
             run_opts = {"device": self._device()}
-            self._classifier = EncoderClassifier.from_hparams(
-                source=self._model_id(),
-                savedir=self.params.get("savedir"),
-                run_opts=run_opts,
-            )
+            load_kwargs: dict[str, Any] = {
+                "source": self._model_id(),
+                "savedir": self.params.get("savedir"),
+                "run_opts": run_opts,
+            }
+            revision = self._model_revision()
+            if revision is not None:
+                from speechbrain.utils.fetching import FetchConfig
+
+                load_kwargs["fetch_config"] = FetchConfig(
+                    revision=revision,
+                    # SpeechBrain otherwise reuses files already linked into
+                    # savedir even when the requested revision has changed.
+                    allow_updates=True,
+                )
+            self._classifier = EncoderClassifier.from_hparams(**load_kwargs)
         return self._classifier
 
     def _model_id(self) -> str:
         return str(self.params.get("model_id") or "speechbrain/lang-id-voxlingua107-ecapa")
+
+    def _model_revision(self) -> str | None:
+        value = self.params.get("model_revision", self.params.get("revision"))
+        if value is None:
+            return None
+        revision = str(value).strip()
+        return revision or None
 
     def _device(self) -> str:
         device = str(self.params.get("device") or self.device_profile.device)

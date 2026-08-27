@@ -3,8 +3,7 @@
 % This is a generic arXiv-style draft, not a final venue template.
 % TODO before submission:
 % 1) Replace author block with real affiliation(s).
-% 2) Archive the expanded per-model benchmark configs with any submission package.
-% 3) Add human accent/nativeness validation if targeting a journal such as TASLP.
+% 2) Add human accent/nativeness validation if targeting a journal such as TASLP.
 
 \usepackage[a4paper,margin=1in]{geometry}
 \usepackage{booktabs}
@@ -32,7 +31,7 @@
 \newcommand{\lid}{LID}
 \newcommand{\leakdelta}{\Delta_{\mathrm{leak}}}
 
-\title{Direction-Aware Evaluation of Source-Language Leakage in Zero-Shot Cross-Lingual Voice Cloning}
+\title{Direction-Aware Evaluation of a Source-Language Leakage Proxy in Zero-Shot Cross-Lingual Voice Cloning}
 
 \author{
     Denis Rukavishnikov\\
@@ -46,7 +45,7 @@
 \maketitle
 
 \begin{abstract}
-Cross-lingual zero-shot voice cloning aims to synthesize speech in a target language while preserving the identity of a reference speaker recorded in a different source language. Existing automatic evaluations often combine target-text intelligibility, language identification, and speaker similarity, but these axes can disagree: a model may preserve a speaker embedding while failing to adapt to target-language phonetics or prosody. We introduce \textit{CrossLingual TTS Lab}, a lightweight benchmark harness for direction-aware evaluation of cross-lingual voice cloning systems. The framework evaluates generated speech using target-language ASR error, a target-language identification score, speaker similarity, and a normalized source-language leakage proxy based on language-embedding centroids. On a Google FLEURS slice covering English, Russian, and Mandarin Chinese, we compare Qwen3-TTS, XTTS v2, Spark-TTS, CosyVoice, and F5-TTS variants, and we calibrate speaker similarity with a Common Voice slice containing repeated known speaker IDs. Results show strong direction dependence: Qwen3-TTS achieves the best balanced intelligibility and consistently negative leakage deltas, XTTS v2 provides strong target-language identification, CosyVoice achieves the highest speaker similarity but exhibits positive leakage in several directions, and F5-TTS shows severe direction-specific collapse for target Russian while remaining competitive on zh$\rightarrow$en. These findings motivate multi-objective, direction-aware evaluation rather than single aggregate rankings.
+Cross-lingual zero-shot voice cloning aims to synthesize speech in a target language while preserving the identity of a reference speaker recorded in a different source language. Existing automatic evaluations often combine target-text intelligibility, language identification, and speaker similarity, but these axes can disagree: a model may preserve a speaker embedding while failing to adapt to target-language phonetics or prosody. We introduce \textit{CrossLingual TTS Lab}, a lightweight benchmark harness for direction-aware evaluation of cross-lingual voice cloning systems. The framework evaluates generated speech using target-language ASR error, a target-language identification score, speaker similarity, and a source--target language-embedding margin used as a leakage proxy. On a crossed Google FLEURS slice covering English, Russian, and Mandarin Chinese, we compare six model artifacts and calibrate speaker similarity with a Common Voice slice containing repeated known speaker IDs. Qwen3-TTS combines the lowest aggregate ASR error with high target-LID scores and consistently negative embedding margins; CosyVoice3 obtains the highest speaker similarity but weaker target adaptation in several directions; and F5-TTS v1 Base collapses on target Russian while remaining competitive on zh$\rightarrow$en. The margin correlates with ASR/LID failures for some systems, but among samples with correct target LID and ASR error below 10\%, successful-sample mean margins still range from $-0.094$ (Qwen3-TTS 1.7B) to $-0.013$ (CosyVoice3). Confidence intervals use a crossed reference/text bootstrap. These findings motivate multi-objective, direction-aware evaluation rather than single aggregate rankings.
 \end{abstract}
 
 \section{Introduction}
@@ -55,14 +54,15 @@ Zero-shot text-to-speech (TTS) and voice cloning systems increasingly support mu
 
 Current automatic evaluation practice often relies on three signals: ASR-based word or character error rate, language identification confidence, and speaker similarity. These metrics are useful but incomplete. High target-language identification does not necessarily imply native-like pronunciation, and high speaker similarity may partially reward retention of source-language acoustic cues. This is especially problematic for models that appear to clone the speaker well but fail to fully adapt to the target language.
 
-This paper presents a direction-aware benchmark and preliminary analysis of modern open or locally runnable zero-shot voice cloning systems. We focus on three source/target languages---English, Russian, and Mandarin Chinese---and evaluate all non-identical source-target directions. The benchmark is implemented in \textit{CrossLingual TTS Lab}, a reproducible harness with config-driven dataset construction, model backend abstraction, metric adapters, resumable generation, and machine-readable reports.
+This paper presents a direction-aware benchmark and preliminary analysis of modern open or locally runnable zero-shot voice cloning systems. We focus on three source/target languages---English, Russian, and Mandarin Chinese---and evaluate all non-identical source-target directions where supported. The benchmark is implemented in \textit{CrossLingual TTS Lab}, a reproducibility-oriented harness with config-driven dataset construction, model backend abstraction, metric adapters, resumable generation, and machine-readable reports.
 
 Our contributions are:
 \begin{enumerate}[leftmargin=1.5em]
     \item We introduce a lightweight benchmark harness for cross-lingual zero-shot voice cloning with pluggable model and metric backends.
     \item We report direction-aware results for multiple modern TTS systems, showing that aggregate averages hide severe model-specific and direction-specific failures.
-    \item We propose a normalized source-language leakage proxy, defined as the difference between generated audio similarity to source-language and target-language centroids in a language-embedding space.
+    \item We study a language-centroid leakage proxy, defined as the difference between generated-audio similarity to source- and target-language centroids, both on all samples and on a pre-specified successful subset; we also quantify its association with ASR and LID.
     \item We calibrate speaker similarity using Common Voice known-speaker real-real, different-speaker, and wrong-reference baselines.
+    \item We report language-stratified crossed reference/text bootstrap intervals and archive checkpoint selectors, reconstructed hashes or revisions, effective inference settings, and explicit provenance status.
 \end{enumerate}
 
 \section{Related Work}
@@ -94,7 +94,7 @@ The desired behavior is that $\hat{x}_{s\rightarrow t}$:
 
 \subsection{Dataset}
 
-We construct a benchmark slice from Google FLEURS. The current experiment uses English, Russian, and Mandarin Chinese. Each full direction contains 100 generated samples where available. The benchmark excludes identical-language directions and evaluates all cross-lingual source-target pairs.
+We construct a benchmark slice from Google FLEURS. The current experiment uses English, Russian, and Mandarin Chinese. Each full direction is a crossed $10\times10$ design: ten reference utterances are paired with the same ten target texts, producing 100 samples where available. Samples that share a reference or target text are therefore not independent. The benchmark excludes identical-language directions and evaluates all cross-lingual source-target pairs.
 
 The current reproducibility snapshot is:
 \begin{itemize}[leftmargin=1.5em]
@@ -102,27 +102,42 @@ The current reproducibility snapshot is:
     \item Config generation script: \texttt{run\_fleurs\_experiment\_example.sh}. Outputs are per-model \texttt{overnight\_runs/config\_*.toml} files.
     \item Languages: English, Russian, Mandarin Chinese.
     \item Jobs per full direction: 100.
-    \item ASR/LID backend: faster-whisper, using \texttt{medium} or \texttt{small} depending on VRAM.
-    \item Speaker similarity: SpeechBrain ECAPA-TDNN (\texttt{speechbrain/spkrec-ecapa-voxceleb}).
-    \item Confidence intervals: 95\% bootstrap intervals with 1000 resamples and seed 20260628.
-    \item Hardware: CUDA-enabled GPUs, approximately 12GB+ VRAM class.
+    \item ASR/LID backend: run-attested \texttt{medium} alias on CUDA/float16, with a \texttt{small} CPU/int8 fallback; their reconstructed revisions are \path{Systran/faster-whisper-medium@08e178d4} and \path{Systran/faster-whisper-small@536b0662}.
+    \item Speaker similarity: run-attested SpeechBrain ECAPA-TDNN alias \path{speechbrain/spkrec-ecapa-voxceleb}; reconstructed revision \texttt{0f99f2d0}.
+    \item Leakage encoder: run-attested SpeechBrain VoxLingua107 alias \path{speechbrain/lang-id-voxlingua107-ecapa}; reconstructed revision \texttt{0253049a}; the preserved centroid file has SHA-256 \texttt{9adca9f8\ldots4373d91}.
+    \item Confidence intervals: 95\% stratified crossed-bootstrap intervals with 1000 resamples and seed 20260628.
+    \item Recorded host profile: Python 3.11, PyTorch 2.11.0+cu130, and an NVIDIA GeForce RTX 4080 Laptop GPU with 11.6GB VRAM.
     \item Subset construction: deterministic first rows after language and length filtering.
     \item Speaker calibration script: \texttt{run\_common\_voice\_calibration.sh}, producing per-model calibration reports under \texttt{overnight\_runs\_cv}.
 \end{itemize}
-The exact generated per-model configs should be archived with benchmark releases to make the snapshot independent of future dataset-order or script changes.
+The best-available synthesis/evaluator snapshot, including reconstructed immutable revisions or surviving local weight hashes and resolved inference settings, is archived in \path{configs/paper_model_snapshot.toml}. Manifests produced by the current code also record model/metric parameters and installed package versions. Evaluator revisions are marked reconstructed because the legacy result details attest their aliases and runtime settings, but not immutable hub commits.
 
 \subsection{Models}
 
-We evaluate the following systems:
-\begin{itemize}[leftmargin=1.5em]
-    \item Qwen3-TTS 1.7B and Qwen3-TTS 0.6B.
-    \item XTTS v2.
-    \item Spark-TTS.
-    \item CosyVoice.
-    \item F5-TTS.
-\end{itemize}
+Table~\ref{tab:model_configs} identifies every evaluated artifact and the recovered synthesis configuration. Full revisions and SHA-256 hashes are stored in \path{configs/paper_model_snapshot.toml}, together with provenance notes distinguishing run-attested values from values reconstructed from surviving caches/repositories. The recovered snapshot lists \texttt{qwen-tts==0.1.1}, \texttt{f5-tts==1.1.20}, and \texttt{TTS==0.22.0}; all top-level run device profiles report PyTorch 2.11.0+cu130, but the legacy manifests do not constitute complete per-environment locks. Because the backend stacks are mutually incompatible, the runner uses an isolated environment per model and resumes at the WAV level.
 
-Because these backends have mutually incompatible dependency stacks, the benchmark runner uses isolated virtual environments per model and resumes at the WAV level when generation is interrupted.
+\begin{table*}[t]
+\centering
+\caption{Best-available model artifacts and effective inference settings. Immutable identifiers and hashes were reconstructed unless described as run-attested in the archived snapshot. ``Unset'' means no experiment-level seed was supplied.}
+\label{tab:model_configs}
+\scriptsize
+\begin{tabular}{p{0.12\linewidth}p{0.29\linewidth}p{0.49\linewidth}}
+\toprule
+Model & Checkpoint / immutable identifier & Prompt and inference configuration \\
+\midrule
+Qwen3-TTS 0.6B & \path{Qwen/Qwen3-TTS-12Hz-0.6B-Base@5d839924} & Empty reference text; x-vector-only cloning; bfloat16/CUDA. Main/subtalker sampling on, both at temperature 0.9, top-$k$ 50, top-$p$ 1.0; repetition penalty 1.05; max 8192; seed unset. \\
+Qwen3-TTS 1.7B & \path{Qwen/Qwen3-TTS-12Hz-1.7B-Base@fd4b2543} & Same prompting, precision, and checkpoint-default generation settings as 0.6B; seed unset. \\
+F5-TTS v1 Base & \path{SWivid/F5-TTS@84e5a410}, \path{F5TTS_v1_Base/model_1250000.safetensors} & Empty API reference text (upstream auto-transcription); EMA, Euler, 32 NFE steps, CFG 2.0, sway $-1.0$, speed 1.0, no silence removal; 24 kHz \path{charactr/vocos-mel-24khz@0feb3fdd}; seed unset/random. \\
+XTTS v2 & \path{tts_models/multilingual/multi-dataset/xtts_v2}; local model SHA-256 \texttt{c7ea2000\ldots9776187} & Reference WAV, target text/language; recovered defaults: temperature 0.75, top-$k$ 50, top-$p$ 0.85, repetition penalty 5, length penalty 1; 24 kHz; seed unset. \\
+CosyVoice3 0.5B (2512) & \path{FunAudioLLM/Fun-CosyVoice3-0.5B-2512}; source commit \texttt{074ca6dc} & Reference transcript with CosyVoice3 system prefix; zero-shot inference, non-streaming, speed 1.0, text frontend on, PyTorch path (no JIT/TRT/vLLM), 24 kHz; recovered checkpoint configuration applies seed 1986. \\
+Spark-TTS 0.5B & \path{SparkAudio/Spark-TTS-0.5B@64207155}; source commit \texttt{2f1ea908} & Reference WAV with no prompt text; sampling, temperature 0.8, top-$k$ 50, top-$p$ 0.95, max 3000, 16 kHz; seed unset. Target Russian is unsupported. \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+The surviving XTTS manifest spans a resumed run: early rows explicitly record CPU execution, whereas later rows use an older metadata schema without a device field. We therefore report the recovered checkpoint and decoding configuration but do not claim a single run-attested XTTS device. New manifests store resolved model parameters and package versions to avoid this ambiguity.
+
+The metric manifests expose a second historical limitation. Most analyzed ASR/LID rows used faster-whisper \texttt{medium} on CUDA/float16, with ASR beam 5, LID beam 1, and VAD enabled. However, 358/600 Qwen3-TTS 0.6B LID rows and 200/399 analyzed Spark-TTS ASR rows fell back after CUDA errors to \texttt{small} on CPU/int8. The immutable evaluator revisions and package versions above were reconstructed afterward. Consequently, results involving the Qwen3-TTS 0.6B LID success screen or correlation, and Spark-TTS ASR success screen or correlation, are provisional pending homogeneous rescoring with one pinned evaluator.
 
 \section{Metrics}
 
@@ -157,7 +172,7 @@ Speaker preservation is measured using cosine similarity between speaker embeddi
 \end{equation}
 Higher values indicate stronger similarity to the reference speaker. We additionally compute calibration baselines to contextualize speaker-similarity scores against false-positive similarity.
 
-\subsection{Normalized Source-Language Leakage Delta}
+\subsection{Language-Centroid Leakage Proxy}
 
 We define an embedding-space leakage proxy using language embeddings. Let $f_{\mathrm{lang}}(x)$ be a VoxLingua107-style language embedding. For each language $\ell$, we compute a FLEURS language centroid $c_\ell$. For a generated sample $\hat{x}_{s\rightarrow t}$, leakage delta is:
 \begin{equation}
@@ -168,73 +183,81 @@ We define an embedding-space leakage proxy using language embeddings. Let $f_{\m
 \end{equation}
 Lower is better. Negative values indicate that generated audio is closer to the target-language centroid than to the source-language centroid. Positive values indicate that generated audio remains closer to the source-language centroid, suggesting source-language leakage under this embedding-space proxy.
 
-This metric should be interpreted as a proxy, not as a calibrated perceptual accent score. Human accent and nativeness judgments remain necessary for full validation.
+This metric should be interpreted as a source--target language-embedding margin, not as a calibrated perceptual accent score. Human accent and nativeness judgments remain necessary for full validation.
+
+\subsection{Successful-Sample and Correlation Analyses}
+
+We pre-specify a successful generated sample as one for which the LID backend detects the correct target language and $E_{\mathrm{ASR}}<0.10$, using WER for English/Russian and CER for Mandarin. We report the mean leakage proxy conditional on this event. Using pairwise-complete samples for leakage and each respective outcome, we additionally report Spearman $\rho$ between $\leakdelta$ and both $E_{\mathrm{ASR}}$ and $S_{\mathrm{LID}}$; Pearson $r$ is included as a sensitivity analysis in the generated result tables. Correlations are descriptive and can reflect between-direction differences; successful-only variation is the stronger check that the margin retains resolution after basic target rendering succeeds.
+
+\subsection{Statistical Analysis}
+
+All 95\% percentile confidence intervals use 1000 language-stratified crossed (pigeonhole) bootstrap replicates with seed 20260628. Within each replicate, reference utterance IDs are resampled with replacement inside each source language and target-text IDs inside each target language. Each generated cell receives the product of its reference and text multiplicities. This preserves the fixed language/direction composition while accounting for both repeated factors and incomplete metric matrices. The same resampling plan is reused across metrics within a reported model/scope, and the procedure is also applied to successful-only means and correlations. For a successful-only mean, clusters are drawn from the full eligible design rather than only the rows that passed the success screen; zero-success draws are retried deterministically until 1000 valid conditional-mean replicates are obtained. Point estimates use unweighted metric-specific complete cases.
 
 \section{Results}
 
 \subsection{Common Target-Language Subset}
 
-Table~\ref{tab:common_subset} reports the common target-language subset with English and Mandarin Chinese targets. Target-Russian directions are excluded from this aggregate to avoid unsupported or highly degraded model conditions, particularly for Spark-TTS and F5-TTS. Target-Russian results are still reported in per-direction tables.
+Table~\ref{tab:common_subset} reports the pre-specified common-support subset with English and Mandarin Chinese targets. This subset is defined from the intersection of target-language support recorded for the evaluated adapters/checkpoints, before inspecting metric values. Target-Russian directions are therefore not part of this aggregate because Spark-TTS does not support Russian synthesis; they remain visible in the target-language and per-direction results for systems that do support or were evaluated on that condition.
 
 \begin{table}[t]
 \centering
-\caption{Common target-language subset. Only English and Mandarin Chinese target conditions are included.}
+\caption{Pre-specified common-support subset. Only English and Mandarin Chinese target conditions are included. CIs use the crossed reference/text bootstrap; one Spark-TTS synthetic placeholder is excluded.}
 \label{tab:common_subset}
 \resizebox{\linewidth}{!}{
 \begin{tabular}{lrrrr}
 \toprule
-Model & $n$ & ASR error $\downarrow$ & Target LID score $\uparrow$ & Speaker sim $\uparrow$ \\
+Model & $n_{\mathrm{ASR/LID/spk}}$ & ASR error $\downarrow$ & Target LID score $\uparrow$ & Speaker sim $\uparrow$ \\
 \midrule
-Qwen3-TTS 1.7B & 400 & 7.0\% [5.9--8.1] & 96.1\% [95.4--96.7] & 0.515 [0.503--0.528] \\
-Qwen3-TTS 0.6B & 397 & 7.8\% [6.6--9.0] & 94.5\% [93.5--95.3] & 0.516 [0.504--0.529] \\
-XTTS v2 & 400 & 9.6\% [8.1--11.3] & 97.0\% [95.8--98.0] & 0.468 [0.455--0.479] \\
-Spark-TTS & 400 & 11.9\% [10.3--13.5] & 96.0\% [94.9--96.9] & 0.420 [0.408--0.432] \\
-CosyVoice & 400 & 17.9\% [15.4--20.5] & 74.7\% [71.5--78.0] & 0.688 [0.674--0.701] \\
-F5-TTS & 400 & 31.8\% [28.1--35.5] & 83.1\% [79.9--86.3] & 0.530 [0.508--0.550] \\
+Qwen3-TTS 1.7B & 400/400/400 & 7.0\% [4.2--10.4] & 96.1\% [94.2--97.3] & 0.515 [0.479--0.550] \\
+Qwen3-TTS 0.6B & 400/400/397 & 8.2\% [4.4--12.3] & 94.4\% [92.5--96.0] & 0.516 [0.483--0.548] \\
+XTTS v2 & 400/400/400 & 9.6\% [5.9--13.9] & 97.0\% [94.2--98.5] & 0.468 [0.438--0.500] \\
+Spark-TTS 0.5B & 399/399/399 & 11.7\% [8.8--14.9] & 96.1\% [93.9--97.6] & 0.421 [0.389--0.451] \\
+CosyVoice3 0.5B & 400/400/400 & 17.9\% [12.6--23.5] & 74.7\% [66.5--82.2] & 0.688 [0.652--0.718] \\
+F5-TTS v1 Base & 400/400/400 & 31.8\% [23.1--40.6] & 83.1\% [75.1--91.0] & 0.530 [0.477--0.581] \\
 \bottomrule
 \end{tabular}
 }
 \end{table}
 
-Qwen3-TTS 1.7B obtains the lowest ASR error, while Qwen3-TTS 0.6B is close despite being smaller. XTTS v2 provides the strongest target-LID score in this subset. CosyVoice obtains the highest speaker similarity but has substantially worse ASR error and LID score, indicating a tradeoff between voice preservation and target-language adaptation.
+Qwen3-TTS 1.7B obtains the lowest ASR error, while Qwen3-TTS 0.6B is close despite being smaller. XTTS v2 provides the highest target-LID score in this subset. CosyVoice3 obtains the highest speaker similarity but has substantially worse ASR error and LID score, illustrating that the automatic axes can diverge.
 
 \subsection{Target-Language Aggregates}
 
 \begin{table}[t]
 \centering
-\caption{Target-language aggregates across all source languages.}
+\caption{Target-language aggregates across all source languages. CIs use the crossed reference/text bootstrap.}
 \label{tab:target_aggregates}
 \resizebox{\linewidth}{!}{
 \begin{tabular}{llrrrr}
 \toprule
-Model & Target & $n$ & ASR error $\downarrow$ & Target LID score $\uparrow$ & Speaker sim $\uparrow$ \\
+Model & Target & $n_{\mathrm{ASR/LID/spk}}$ & ASR error $\downarrow$ & Target LID score $\uparrow$ & Speaker sim $\uparrow$ \\
 \midrule
-Qwen3-TTS 1.7B & en & 200 & 3.9\% [3.0--4.9] & 93.8\% [92.6--94.9] & 0.556 [0.540--0.571] \\
-Qwen3-TTS 0.6B & en & 199 & 5.1\% [3.8--6.2] & 90.8\% [89.0--92.3] & 0.571 [0.557--0.584] \\
-XTTS v2 & en & 200 & 3.7\% [2.7--4.6] & 97.1\% [96.7--97.5] & 0.497 [0.485--0.509] \\
-Spark-TTS & en & 200 & 4.8\% [3.6--6.3] & 93.6\% [92.2--95.0] & 0.433 [0.420--0.445] \\
-CosyVoice & en & 200 & 12.2\% [9.7--14.8] & 72.7\% [68.9--76.6] & 0.719 [0.704--0.734] \\
-F5-TTS & en & 200 & 13.1\% [10.8--15.7] & 94.6\% [93.6--95.5] & 0.610 [0.596--0.622] \\
+Qwen3-TTS 1.7B & en & 200/200/200 & 3.9\% [0.6--7.8] & 93.8\% [90.5--96.0] & 0.556 [0.513--0.596] \\
+Qwen3-TTS 0.6B & en & 200/200/199 & 5.6\% [0.6--12.6] & 90.7\% [86.5--93.6] & 0.571 [0.531--0.606] \\
+XTTS v2 & en & 200/200/200 & 3.7\% [0.6--7.7] & 97.1\% [95.8--98.1] & 0.497 [0.472--0.522] \\
+Spark-TTS 0.5B & en & 199/199/199 & 4.4\% [1.2--8.2] & 93.8\% [91.1--96.2] & 0.435 [0.401--0.470] \\
+CosyVoice3 0.5B & en & 200/200/200 & 12.2\% [6.1--19.1] & 72.7\% [61.8--82.2] & 0.719 [0.684--0.751] \\
+F5-TTS v1 Base & en & 200/200/200 & 13.1\% [7.7--20.3] & 94.6\% [91.8--96.7] & 0.610 [0.575--0.642] \\
 \midrule
-Qwen3-TTS 1.7B & ru & 200 & 1.5\% [1.0--2.1] & 97.0\% [96.4--97.5] & 0.479 [0.459--0.499] \\
-Qwen3-TTS 0.6B & ru & 194 & 4.1\% [3.1--5.3] & 98.3\% [97.9--98.6] & 0.449 [0.428--0.473] \\
-XTTS v2 & ru & 200 & 7.5\% [6.0--9.4] & 97.5\% [96.0--98.7] & 0.456 [0.435--0.479] \\
-Spark-TTS & ru & 0 & -- & -- & -- \\
-CosyVoice & ru & 200 & 53.3\% [47.1--59.9] & 31.4\% [25.9--37.1] & 0.731 [0.713--0.748] \\
-F5-TTS & ru & 200 & 131.9\% [122.3--142.3] & 0.0\% [0.0--0.0] & 0.526 [0.482--0.567] \\
+Qwen3-TTS 1.7B & ru & 200/200/200 & 1.5\% [0.4--3.0] & 97.0\% [95.5--98.2] & 0.479 [0.443--0.517] \\
+Qwen3-TTS 0.6B & ru & 200/200/194 & 4.9\% [2.4--7.5] & 98.1\% [97.2--98.8] & 0.449 [0.415--0.489] \\
+XTTS v2 & ru & 200/200/200 & 7.5\% [4.6--11.4] & 97.5\% [94.1--98.9] & 0.456 [0.416--0.494] \\
+Spark-TTS 0.5B & ru & 0/0/0 & -- & -- & -- \\
+CosyVoice3 0.5B & ru & 200/200/200 & 53.3\% [40.6--66.4] & 31.4\% [16.7--48.3] & 0.731 [0.698--0.756] \\
+F5-TTS v1 Base & ru & 200/200/200 & 131.9\% [118.1--148.6] & 0.0\% [0.0--0.0] & 0.526 [0.426--0.628] \\
 \midrule
-Qwen3-TTS 1.7B & zh & 200 & 10.1\% [8.2--11.9] & 98.5\% [98.2--98.7] & 0.474 [0.456--0.491] \\
-Qwen3-TTS 0.6B & zh & 198 & 10.6\% [8.9--12.7] & 98.2\% [97.8--98.6] & 0.460 [0.441--0.479] \\
-XTTS v2 & zh & 200 & 15.5\% [12.7--18.5] & 96.8\% [94.4--98.7] & 0.439 [0.421--0.456] \\
-Spark-TTS & zh & 200 & 19.1\% [16.7--21.4] & 98.3\% [96.8--99.4] & 0.408 [0.387--0.427] \\
-CosyVoice & zh & 200 & 23.5\% [19.7--27.4] & 76.8\% [71.8--81.9] & 0.657 [0.634--0.678] \\
-F5-TTS & zh & 200 & 50.5\% [45.0--55.8] & 71.6\% [65.8--77.6] & 0.451 [0.412--0.486] \\
+Qwen3-TTS 1.7B & zh & 200/200/200 & 10.1\% [5.1--16.2] & 98.5\% [97.7--99.1] & 0.474 [0.433--0.512] \\
+Qwen3-TTS 0.6B & zh & 200/200/198 & 10.8\% [5.8--15.9] & 98.1\% [97.2--99.0] & 0.460 [0.422--0.502] \\
+XTTS v2 & zh & 200/200/200 & 15.5\% [9.5--21.8] & 96.8\% [91.7--99.4] & 0.439 [0.394--0.481] \\
+Spark-TTS 0.5B & zh & 200/200/200 & 19.1\% [13.8--24.5] & 98.3\% [95.0--99.5] & 0.408 [0.365--0.453] \\
+CosyVoice3 0.5B & zh & 200/200/200 & 23.5\% [15.6--31.9] & 76.8\% [64.8--88.6] & 0.657 [0.608--0.696] \\
+F5-TTS v1 Base & zh & 200/200/200 & 50.5\% [35.0--67.1] & 71.6\% [55.9--86.9] & 0.451 [0.360--0.538] \\
 \bottomrule
 \end{tabular}
 }
 \end{table}
 
-Target Chinese is more difficult for most systems than target English or Russian. Qwen3-TTS remains the most balanced system, while XTTS is highly competitive for target English but degrades on target Chinese. F5-TTS collapses on target Russian, supporting the decision to separate full-coverage and common-subset comparisons.
+Target Chinese has higher ASR error than target English for all six systems. Qwen3-TTS 1.7B has the lowest aggregate ASR error for both target Russian and target Chinese, while XTTS v2 has the highest target-LID score for target English. F5-TTS v1 Base collapses on target Russian. These Russian results are reported for transparency but did not determine the pre-specified common-support subset.
 
 \subsection{Per-Direction Failures}
 
@@ -242,50 +265,53 @@ Table~\ref{tab:selected_directions} shows selected directions that illustrate th
 
 \begin{table}[t]
 \centering
-\caption{Selected per-direction results showing asymmetric behavior.}
+\caption{Selected per-direction results showing asymmetric behavior. CIs use the crossed reference/text bootstrap.}
 \label{tab:selected_directions}
 \resizebox{\linewidth}{!}{
 \begin{tabular}{llrrrr}
 \toprule
 Model & Direction & $n$ & ASR error $\downarrow$ & Target LID score $\uparrow$ & Speaker sim $\uparrow$ \\
 \midrule
-Qwen3-TTS 1.7B & en$\rightarrow$ru & 100 & 1.4\% [0.8--2.2] & 95.5\% [94.6--96.4] & 0.365 [0.343--0.386] \\
-Qwen3-TTS 1.7B & ru$\rightarrow$zh & 100 & 13.6\% [10.5--16.5] & 99.4\% [99.3--99.4] & 0.555 [0.536--0.574] \\
-XTTS v2 & ru$\rightarrow$en & 100 & 3.5\% [2.3--4.8] & 97.0\% [96.5--97.5] & 0.447 [0.434--0.460] \\
-Spark-TTS & ru$\rightarrow$zh & 100 & 12.7\% [10.1--15.3] & 99.4\% [99.3--99.5] & 0.497 [0.478--0.516] \\
-CosyVoice & zh$\rightarrow$ru & 100 & 67.7\% [57.3--78.7] & 21.5\% [14.3--29.8] & 0.787 [0.767--0.803] \\
-F5-TTS & zh$\rightarrow$en & 100 & 3.7\% [2.3--5.2] & 95.5\% [94.0--96.8] & 0.658 [0.643--0.673] \\
-F5-TTS & zh$\rightarrow$ru & 100 & 146.3\% [131.4--162.4] & 0.0\% [0.0--0.0] & 0.721 [0.710--0.730] \\
+Qwen3-TTS 1.7B & en$\rightarrow$ru & 100 & 1.4\% [0.3--2.9] & 95.5\% [92.9--97.5] & 0.365 [0.302--0.423] \\
+Qwen3-TTS 1.7B & ru$\rightarrow$zh & 100 & 13.6\% [6.2--20.8] & 99.4\% [99.1--99.6] & 0.555 [0.499--0.612] \\
+XTTS v2 & ru$\rightarrow$en & 100 & 3.5\% [0.5--7.3] & 97.0\% [95.7--98.0] & 0.447 [0.414--0.482] \\
+Spark-TTS 0.5B & ru$\rightarrow$zh & 100 & 12.7\% [6.6--19.5] & 99.4\% [99.1--99.6] & 0.497 [0.442--0.551] \\
+CosyVoice3 0.5B & zh$\rightarrow$ru & 100 & 67.7\% [48.7--91.1] & 21.5\% [7.5--39.4] & 0.787 [0.752--0.815] \\
+F5-TTS v1 Base & zh$\rightarrow$en & 100 & 3.7\% [0.4--8.3] & 95.5\% [90.9--98.1] & 0.658 [0.617--0.695] \\
+F5-TTS v1 Base & zh$\rightarrow$ru & 100 & 146.3\% [125.1--168.2] & 0.0\% [0.0--0.0] & 0.721 [0.697--0.746] \\
 \bottomrule
 \end{tabular}
 }
 \end{table}
 
-Aggregate averages hide severe model-specific and direction-specific failures. F5-TTS is competitive on zh$\rightarrow$en but fails on target Russian. CosyVoice often obtains high speaker similarity while exhibiting weak intelligibility and target LID. This motivates direction-aware reporting.
+Aggregate averages hide severe model-specific and direction-specific failures. F5-TTS v1 Base is competitive on zh$\rightarrow$en but fails on target Russian. CosyVoice3 often obtains high speaker similarity while exhibiting weak intelligibility and target LID. This motivates direction-aware reporting.
 
-\subsection{Source-Language Leakage}
+\subsection{Leakage on Successful Samples and Association with ASR/LID}
 
-Table~\ref{tab:leakage_summary} summarizes the mean leakage delta by model. Full direction-level leakage results are reported in Appendix~\ref{app:leakage_directions}.
+Table~\ref{tab:leakage_summary} compares the language-centroid margin on all scored samples and on the pre-specified successful subset. It also quantifies overlap with the existing ASR and LID measures. Full direction-level results for both all and successful samples are reported in Appendix~\ref{app:leakage_directions}.
 
-\begin{table}[t]
+\begin{table*}[t]
 \centering
-\caption{Model-level leakage-delta summary. Lower is better; negative values indicate generated speech is closer to the target-language centroid than the source-language centroid.}
+\caption{Model-level language-centroid leakage proxy on all and successful samples, with Spearman correlations against ASR error and the conservative target-LID score. Success requires correct target LID and ASR error below 10\%. Brackets are 95\% crossed-bootstrap CIs. Lower $\leakdelta$ is better.}
 \label{tab:leakage_summary}
-\begin{tabular}{lrrr}
+\scriptsize
+\resizebox{\textwidth}{!}{
+\begin{tabular}{lrrrrrr}
 \toprule
-Model & $n$ & Mean $\leakdelta$ $\downarrow$ & Range \\
+Model & All $n$ & $\leakdelta$, all & Successful $n$/eligible & $\leakdelta$, successful & $\rho(\leakdelta,E_{\mathrm{ASR}})$ & $\rho(\leakdelta,S_{\mathrm{LID}})$ \\
 \midrule
-Qwen3-TTS 1.7B & 600 & -0.092 & [-0.130, -0.053] \\
-Qwen3-TTS 0.6B & 591 & -0.084 & [-0.127, -0.032] \\
-XTTS v2 & 600 & -0.079 & [-0.107, -0.032] \\
-Spark-TTS & 400 & -0.068 & [-0.107, -0.035] \\
-F5-TTS & 600 & -0.002 & [-0.061, 0.109] \\
-CosyVoice & 600 & 0.013 & [-0.034, 0.053] \\
+Qwen3-TTS 1.7B & 600 & -0.092 [-0.100, -0.084] & 482/600 & -0.094 [-0.103, -0.086] & 0.083 [-0.090, 0.246] & -0.265 [-0.435, -0.080] \\
+Qwen3-TTS 0.6B & 600 & -0.083 [-0.090, -0.075] & 456/600 & -0.085 [-0.093, -0.076] & 0.044 [-0.135, 0.229] & -0.469 [-0.583, -0.325] \\
+XTTS v2 & 600 & -0.078 [-0.088, -0.069] & 420/600 & -0.081 [-0.090, -0.070] & 0.044 [-0.128, 0.209] & -0.206 [-0.349, -0.048] \\
+Spark-TTS 0.5B & 399 & -0.067 [-0.074, -0.060] & 234/399 & -0.069 [-0.077, -0.061] & 0.082 [-0.078, 0.229] & -0.021 [-0.211, 0.172] \\
+F5-TTS v1 Base & 600 & -0.002 [-0.011, 0.008] & 144/600 & -0.058 [-0.069, -0.045] & 0.775 [0.703, 0.835] & -0.800 [-0.836, -0.744] \\
+CosyVoice3 0.5B & 600 & 0.012 [0.004, 0.022] & 226/600 & -0.013 [-0.022, -0.004] & 0.485 [0.352, 0.600] & -0.648 [-0.736, -0.538] \\
 \bottomrule
 \end{tabular}
-\end{table}
+}
+\end{table*}
 
-The leakage probe reveals a tradeoff in CosyVoice: high speaker-similarity scores coincide with positive or near-zero leakage deltas in multiple directions. This suggests that high speaker embedding scores may partly reflect incomplete adaptation to target-language phonetics or prosody. In contrast, Qwen3-TTS consistently shifts generated audio closer to the target-language centroid under this embedding-space probe while maintaining strong intelligibility.
+For F5-TTS v1 Base and CosyVoice3, larger margins co-occur with higher ASR error and lower target-LID score. The successful-only analysis therefore changes both models' aggregate means, including a sign change for CosyVoice3. Nevertheless, conditional means still differ across systems, from $-0.094$ for Qwen3-TTS 1.7B to $-0.013$ for CosyVoice3, and direction-level successful means span both near-zero and substantially negative values. The proxy thus overlaps with ASR/LID but is not made constant by the binary success screen. This automatic analysis does not establish perceptual independence or accent validity. Because of the mixed evaluator fallback documented above, the Qwen3-TTS 0.6B and Spark-TTS success/correlation results should be read as provisional.
 
 \subsection{Speaker-Similarity Calibration}
 
@@ -295,22 +321,22 @@ The leakage probe reveals a tradeoff in CosyVoice: high speaker-similarity score
 \label{tab:spk_calibration}
 \begin{tabular}{lrr}
 \toprule
-Pair type & Speaker sim & $n$ \\
+Pair type & Speaker sim (mean $\pm$ SD) & $n$ \\
 \midrule
 Same speaker real-real, known speaker ID & 0.635 $\pm$ 0.129 & 15 \\
 Different speaker, same language & 0.104 $\pm$ 0.104 & 120 \\
 Different speaker, cross-language & 0.081 $\pm$ 0.090 & 300 \\
-Generated vs. wrong reference, F5-TTS & 0.042 $\pm$ 0.075 & 600 \\
+Generated vs. wrong reference, F5-TTS v1 Base & 0.042 $\pm$ 0.075 & 600 \\
 Generated vs. wrong reference, Qwen3-TTS 0.6B & 0.059 $\pm$ 0.068 & 600 \\
 Generated vs. wrong reference, Qwen3-TTS 1.7B & 0.052 $\pm$ 0.063 & 600 \\
 Generated vs. wrong reference, XTTS v2 & 0.064 $\pm$ 0.070 & 600 \\
-Generated vs. wrong reference, CosyVoice & 0.078 $\pm$ 0.082 & 600 \\
-Generated vs. wrong reference, Spark-TTS & 0.058 $\pm$ 0.079 & 400 \\
+Generated vs. wrong reference, CosyVoice3 0.5B & 0.078 $\pm$ 0.082 & 600 \\
+Generated vs. wrong reference, Spark-TTS 0.5B & 0.058 $\pm$ 0.079 & 400 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The calibration matrix suggests that ECAPA-TDNN separates known same-speaker real-real pairs from different-speaker pairs in this setup. The generated-vs-wrong-reference false-positive checks lie near the different-speaker bounds for all models, suggesting that speaker-similarity scores are not trivially inflated by cross-language mismatch. This supports treating CosyVoice's high FLEURS speaker similarity as a plausible voice-preservation signal relative to calibrated bounds. Human validation is still required before making strong identity-preservation claims. The current Common Voice slice does not provide same-speaker cross-language positives, so cross-lingual identity preservation remains calibrated indirectly.
+The calibration matrix suggests that ECAPA-TDNN separates known same-speaker real-real pairs from different-speaker pairs in this setup. The generated-vs-wrong-reference false-positive checks lie near the different-speaker bounds for all models, suggesting that speaker-similarity scores are not trivially inflated by cross-language mismatch. These bounds provide limited context for CosyVoice3's high FLEURS speaker-similarity score but do not establish perceived voice preservation. Human validation is still required before making identity-preservation claims. The current Common Voice slice does not provide same-speaker cross-language positives, so cross-lingual identity preservation remains calibrated indirectly.
 
 The Common Voice calibration slice uses the \texttt{ru}, \texttt{en}, and \texttt{zh-CN} locales. It contains five speakers per locale, two reference utterances per speaker, 30 reference prompts in total, and 10 target texts per locale. Positive and negative real-real calibration pairs are computed from all pairwise combinations among the 30 reference prompts: repeated IDs within a locale form same-speaker positives, different IDs within a locale form same-language negatives, and different IDs across locales form cross-language negatives. Generated-vs-wrong-reference checks are computed for every generated WAV in the same run; each generated sample is compared with a deterministic wrong reference from a different source language and different known speaker, so the generated samples follow the same source-target distribution as the benchmark while the wrong reference is cross-language by construction.
 
@@ -319,10 +345,13 @@ The Common Voice calibration slice uses the \texttt{ru}, \texttt{en}, and \textt
 \section{Discussion}
 
 \paragraph{Direction-aware evaluation is necessary.}
-The same model can perform well in one direction and fail in another. F5-TTS is a clear example: it performs strongly on zh$\rightarrow$en but collapses for target Russian. Reporting only global averages would obscure this asymmetry.
+The same model can perform well in one direction and fail in another. F5-TTS v1 Base is a clear example: it performs strongly on zh$\rightarrow$en but collapses for target Russian. Reporting only global averages would obscure this asymmetry.
 
-\paragraph{Speaker preservation and language adaptation can conflict.}
-CosyVoice reaches the highest speaker-similarity scores but also shows poor ASR/LID scores in several directions and positive leakage deltas. This indicates that strong voice preservation, as measured by speaker embeddings, can coincide with incomplete target-language adaptation.
+\paragraph{Automatic speaker similarity and language adaptation can diverge.}
+CosyVoice3 reaches the highest speaker-similarity scores but also shows poor ASR/LID scores in several directions and has the largest aggregate language-centroid margin. Its margin becomes slightly negative after the success screen, but remains closest to zero among the six models. Thus high automatic speaker similarity can coincide with incomplete target-language adaptation; the automatic margin should not be read as a perceptual diagnosis by itself.
+
+\paragraph{The leakage proxy overlaps with, but is not identical to, basic success metrics.}
+F5-TTS and CosyVoice3 show strong leakage--ASR/LID correlations, whereas the corresponding ASR correlations for Qwen3-TTS, Spark-TTS, and XTTS are weak and their CIs include zero. More importantly, successful-only means retain model- and direction-level variation after correct target LID and low ASR error are enforced. This supports reporting the proxy as an additional embedding-space diagnostic, while leaving perceptual accent validation to future work.
 
 \paragraph{Target Chinese remains challenging.}
 Several systems show higher ASR error on target Mandarin Chinese than on target English, despite high target-LID scores for the stronger systems. This suggests that language identification is less sensitive than target-text ASR to fine-grained content and pronunciation failures.
@@ -344,13 +373,13 @@ Third, human evaluation is not yet included. Human accent, nativeness, speaker s
 
 Fourth, the current experiment covers only three languages. Although English, Russian, and Mandarin Chinese offer typological and script diversity, broader language coverage is needed before drawing universal conclusions.
 
-Finally, exact generated per-model config files should be archived with benchmark releases. The current public script documents how the snapshot is generated, but preserving the expanded configs would make the reported slice robust to future dataset-order or script changes.
+Finally, the repository now archives synthesis and evaluator checkpoint selectors, recovered immutable revisions or local weight hashes, effective inference settings, the centroid hash, and key package versions. Some legacy run manifests did not record immutable hub revisions or complete isolated-environment locks, so those provenance entries are explicitly marked as reconstructed rather than run-attested. Qwen, F5-TTS, Spark-TTS, and XTTS were also run without a fixed experiment-level seed. In addition, the historical evaluator execution was heterogeneous: Qwen3-TTS 0.6B LID and Spark-TTS ASR include CPU/int8 \texttt{small} fallbacks among otherwise CUDA/float16 \texttt{medium} scores. The archived snapshot supports a pinned new run, but it does not prove that every reconstructed revision was used historically, and the original waveforms are not bit-exactly reproducible from configuration alone. Homogeneous rescoring is needed before treating the affected success and correlation comparisons as final.
 
 \FloatBarrier
 
 \section{Conclusion}
 
-We presented a direction-aware benchmark for zero-shot cross-lingual voice cloning and evaluated multiple modern TTS systems on a FLEURS-based English/Russian/Mandarin slice. The results show that cross-lingual voice cloning cannot be summarized by a single aggregate score: intelligibility, target-language identification, speaker similarity, and source-language leakage diverge across models and directions. Qwen3-TTS provides the strongest balanced performance, XTTS v2 is highly competitive on target-language identification, CosyVoice shows strong automatic speaker-similarity scores but also elevated source-language leakage under the proposed embedding-space proxy, and F5-TTS exhibits severe direction-specific instability. These findings support multi-objective evaluation and motivate future work on human-validated source-language leakage metrics.
+We presented a direction-aware benchmark for zero-shot cross-lingual voice cloning and evaluated six versioned TTS artifacts on a FLEURS-based English/Russian/Mandarin slice. The results show that the task cannot be summarized by a single aggregate score: intelligibility, target-language identification, speaker similarity, and the language-centroid margin diverge across models and directions. Qwen3-TTS 1.7B combines the lowest common-subset ASR error with high target-LID scores and consistently negative margins; XTTS v2 has the highest common-subset target-LID score; CosyVoice3 has the highest automatic speaker similarity but weaker target adaptation; and F5-TTS v1 Base exhibits severe direction-specific instability. Correlation and successful-only analyses show that the margin overlaps with ASR/LID failures while retaining between-system and between-direction variation after a basic success screen. These findings support multi-objective evaluation and motivate human validation of the embedding-space leakage proxy.
 
 \FloatBarrier
 
@@ -360,7 +389,7 @@ We presented a direction-aware benchmark for zero-shot cross-lingual voice cloni
 \label{app:leakage_directions}
 
 \begin{longtable}{llrr}
-\caption{Normalized source-language leakage delta by direction. Higher values indicate stronger source-language similarity relative to target-language similarity.}
+\caption{Language-centroid leakage proxy by direction. Higher values indicate stronger source-language similarity relative to target-language similarity. Brackets are 95\% crossed-bootstrap CIs.}
 \label{tab:leakage_directions}\\
 \toprule
 Model & Direction & $n$ & Leakage delta $\downarrow$ \\
@@ -370,40 +399,95 @@ Model & Direction & $n$ & Leakage delta $\downarrow$ \\
 Model & Direction & $n$ & Leakage delta $\downarrow$ \\
 \midrule
 \endhead
-F5-TTS & en$\rightarrow$ru & 100 & 0.070 [0.062, 0.079] \\
-F5-TTS & en$\rightarrow$zh & 100 & -0.023 [-0.032, -0.015] \\
-F5-TTS & ru$\rightarrow$en & 100 & -0.061 [-0.070, -0.052] \\
-F5-TTS & ru$\rightarrow$zh & 100 & -0.054 [-0.060, -0.047] \\
-F5-TTS & zh$\rightarrow$en & 100 & -0.051 [-0.057, -0.045] \\
-F5-TTS & zh$\rightarrow$ru & 100 & 0.109 [0.105, 0.113] \\
-CosyVoice & en$\rightarrow$ru & 100 & 0.045 [0.035, 0.056] \\
-CosyVoice & en$\rightarrow$zh & 100 & -0.034 [-0.039, -0.028] \\
-CosyVoice & ru$\rightarrow$en & 100 & 0.001 [-0.008, 0.009] \\
-CosyVoice & ru$\rightarrow$zh & 100 & 0.018 [0.011, 0.024] \\
-CosyVoice & zh$\rightarrow$en & 100 & -0.008 [-0.013, -0.003] \\
-CosyVoice & zh$\rightarrow$ru & 100 & 0.053 [0.045, 0.061] \\
-Qwen3-TTS 0.6B & en$\rightarrow$ru & 96 & -0.127 [-0.132, -0.121] \\
-Qwen3-TTS 0.6B & en$\rightarrow$zh & 98 & -0.075 [-0.079, -0.071] \\
-Qwen3-TTS 0.6B & ru$\rightarrow$en & 100 & -0.076 [-0.084, -0.070] \\
-Qwen3-TTS 0.6B & ru$\rightarrow$zh & 100 & -0.086 [-0.091, -0.081] \\
-Qwen3-TTS 0.6B & zh$\rightarrow$en & 99 & -0.032 [-0.037, -0.027] \\
-Qwen3-TTS 0.6B & zh$\rightarrow$ru & 98 & -0.109 [-0.114, -0.104] \\
-Qwen3-TTS 1.7B & en$\rightarrow$ru & 100 & -0.130 [-0.137, -0.124] \\
-Qwen3-TTS 1.7B & en$\rightarrow$zh & 100 & -0.071 [-0.075, -0.067] \\
-Qwen3-TTS 1.7B & ru$\rightarrow$en & 100 & -0.094 [-0.103, -0.086] \\
-Qwen3-TTS 1.7B & ru$\rightarrow$zh & 100 & -0.088 [-0.093, -0.083] \\
-Qwen3-TTS 1.7B & zh$\rightarrow$en & 100 & -0.053 [-0.058, -0.048] \\
-Qwen3-TTS 1.7B & zh$\rightarrow$ru & 100 & -0.116 [-0.121, -0.111] \\
-Spark-TTS & en$\rightarrow$zh & 100 & -0.050 [-0.054, -0.045] \\
-Spark-TTS & ru$\rightarrow$en & 100 & -0.107 [-0.114, -0.101] \\
-Spark-TTS & ru$\rightarrow$zh & 100 & -0.078 [-0.082, -0.073] \\
-Spark-TTS & zh$\rightarrow$en & 100 & -0.035 [-0.039, -0.030] \\
-XTTS v2 & en$\rightarrow$ru & 100 & -0.107 [-0.116, -0.100] \\
-XTTS v2 & en$\rightarrow$zh & 100 & -0.063 [-0.067, -0.059] \\
-XTTS v2 & ru$\rightarrow$en & 100 & -0.099 [-0.105, -0.092] \\
-XTTS v2 & ru$\rightarrow$zh & 100 & -0.085 [-0.089, -0.080] \\
-XTTS v2 & zh$\rightarrow$en & 100 & -0.032 [-0.038, -0.025] \\
-XTTS v2 & zh$\rightarrow$ru & 100 & -0.085 [-0.092, -0.078] \\
+F5-TTS v1 Base & en$\rightarrow$ru & 100 & 0.070 [0.046, 0.097] \\
+F5-TTS v1 Base & en$\rightarrow$zh & 100 & -0.023 [-0.048, 0.002] \\
+F5-TTS v1 Base & ru$\rightarrow$en & 100 & -0.061 [-0.087, -0.037] \\
+F5-TTS v1 Base & ru$\rightarrow$zh & 100 & -0.054 [-0.073, -0.034] \\
+F5-TTS v1 Base & zh$\rightarrow$en & 100 & -0.051 [-0.068, -0.030] \\
+F5-TTS v1 Base & zh$\rightarrow$ru & 100 & 0.109 [0.098, 0.120] \\
+CosyVoice3 0.5B & en$\rightarrow$ru & 100 & 0.045 [0.018, 0.074] \\
+CosyVoice3 0.5B & en$\rightarrow$zh & 100 & -0.034 [-0.048, -0.020] \\
+CosyVoice3 0.5B & ru$\rightarrow$en & 100 & 0.001 [-0.022, 0.026] \\
+CosyVoice3 0.5B & ru$\rightarrow$zh & 100 & 0.018 [0.001, 0.036] \\
+CosyVoice3 0.5B & zh$\rightarrow$en & 100 & -0.008 [-0.023, 0.008] \\
+CosyVoice3 0.5B & zh$\rightarrow$ru & 100 & 0.053 [0.032, 0.071] \\
+Qwen3-TTS 0.6B & en$\rightarrow$ru & 100 & -0.121 [-0.140, -0.102] \\
+Qwen3-TTS 0.6B & en$\rightarrow$zh & 100 & -0.074 [-0.086, -0.064] \\
+Qwen3-TTS 0.6B & ru$\rightarrow$en & 100 & -0.076 [-0.096, -0.058] \\
+Qwen3-TTS 0.6B & ru$\rightarrow$zh & 100 & -0.086 [-0.098, -0.072] \\
+Qwen3-TTS 0.6B & zh$\rightarrow$en & 100 & -0.032 [-0.045, -0.019] \\
+Qwen3-TTS 0.6B & zh$\rightarrow$ru & 100 & -0.106 [-0.123, -0.086] \\
+Qwen3-TTS 1.7B & en$\rightarrow$ru & 100 & -0.130 [-0.149, -0.112] \\
+Qwen3-TTS 1.7B & en$\rightarrow$zh & 100 & -0.071 [-0.084, -0.059] \\
+Qwen3-TTS 1.7B & ru$\rightarrow$en & 100 & -0.094 [-0.119, -0.072] \\
+Qwen3-TTS 1.7B & ru$\rightarrow$zh & 100 & -0.088 [-0.101, -0.075] \\
+Qwen3-TTS 1.7B & zh$\rightarrow$en & 100 & -0.053 [-0.066, -0.041] \\
+Qwen3-TTS 1.7B & zh$\rightarrow$ru & 100 & -0.116 [-0.131, -0.100] \\
+Spark-TTS 0.5B & en$\rightarrow$ru & 0 & -- \\
+Spark-TTS 0.5B & en$\rightarrow$zh & 100 & -0.050 [-0.062, -0.036] \\
+Spark-TTS 0.5B & ru$\rightarrow$en & 99 & -0.108 [-0.124, -0.093] \\
+Spark-TTS 0.5B & ru$\rightarrow$zh & 100 & -0.078 [-0.090, -0.064] \\
+Spark-TTS 0.5B & zh$\rightarrow$en & 100 & -0.035 [-0.047, -0.021] \\
+Spark-TTS 0.5B & zh$\rightarrow$ru & 0 & -- \\
+XTTS v2 & en$\rightarrow$ru & 100 & -0.107 [-0.128, -0.087] \\
+XTTS v2 & en$\rightarrow$zh & 100 & -0.063 [-0.075, -0.052] \\
+XTTS v2 & ru$\rightarrow$en & 100 & -0.099 [-0.117, -0.081] \\
+XTTS v2 & ru$\rightarrow$zh & 100 & -0.085 [-0.097, -0.071] \\
+XTTS v2 & zh$\rightarrow$en & 100 & -0.032 [-0.050, -0.010] \\
+XTTS v2 & zh$\rightarrow$ru & 100 & -0.085 [-0.105, -0.062] \\
+\bottomrule
+\end{longtable}
+
+\section{Direction-Level Leakage on Successful Samples}
+\label{app:successful_leakage_directions}
+
+\begin{longtable}{llrrr}
+\caption{Language-centroid leakage proxy after the pre-specified success screen, by direction. Success requires correct target LID and ASR error below 10\%. Brackets are 95\% crossed-bootstrap CIs.}
+\label{tab:successful_leakage_directions}\\
+\toprule
+Model & Direction & Eligible $n$ & Successful $n$ & Successful $\leakdelta$ $\downarrow$ \\
+\midrule
+\endfirsthead
+\toprule
+Model & Direction & Eligible $n$ & Successful $n$ & Successful $\leakdelta$ $\downarrow$ \\
+\midrule
+\endhead
+F5-TTS v1 Base & en$\rightarrow$ru & 100 & 0 & -- \\
+F5-TTS v1 Base & en$\rightarrow$zh & 100 & 32 & -0.057 [-0.076, -0.035] \\
+F5-TTS v1 Base & ru$\rightarrow$en & 100 & 27 & -0.077 [-0.106, -0.051] \\
+F5-TTS v1 Base & ru$\rightarrow$zh & 100 & 8 & -0.066 [-0.094, -0.036] \\
+F5-TTS v1 Base & zh$\rightarrow$en & 100 & 77 & -0.051 [-0.069, -0.032] \\
+F5-TTS v1 Base & zh$\rightarrow$ru & 100 & 0 & -- \\
+CosyVoice3 0.5B & en$\rightarrow$ru & 100 & 10 & 0.009 [-0.064, 0.069] \\
+CosyVoice3 0.5B & en$\rightarrow$zh & 100 & 71 & -0.034 [-0.048, -0.022] \\
+CosyVoice3 0.5B & ru$\rightarrow$en & 100 & 51 & -0.003 [-0.025, 0.022] \\
+CosyVoice3 0.5B & ru$\rightarrow$zh & 100 & 23 & 0.009 [-0.012, 0.035] \\
+CosyVoice3 0.5B & zh$\rightarrow$en & 100 & 61 & -0.010 [-0.025, 0.004] \\
+CosyVoice3 0.5B & zh$\rightarrow$ru & 100 & 10 & -0.001 [-0.044, 0.034] \\
+Qwen3-TTS 0.6B & en$\rightarrow$ru & 100 & 78 & -0.128 [-0.141, -0.113] \\
+Qwen3-TTS 0.6B & en$\rightarrow$zh & 100 & 78 & -0.074 [-0.084, -0.064] \\
+Qwen3-TTS 0.6B & ru$\rightarrow$en & 100 & 78 & -0.075 [-0.095, -0.056] \\
+Qwen3-TTS 0.6B & ru$\rightarrow$zh & 100 & 58 & -0.086 [-0.104, -0.068] \\
+Qwen3-TTS 0.6B & zh$\rightarrow$en & 100 & 75 & -0.033 [-0.046, -0.019] \\
+Qwen3-TTS 0.6B & zh$\rightarrow$ru & 100 & 89 & -0.110 [-0.124, -0.096] \\
+Qwen3-TTS 1.7B & en$\rightarrow$ru & 100 & 93 & -0.130 [-0.149, -0.113] \\
+Qwen3-TTS 1.7B & en$\rightarrow$zh & 100 & 83 & -0.071 [-0.083, -0.059] \\
+Qwen3-TTS 1.7B & ru$\rightarrow$en & 100 & 73 & -0.093 [-0.119, -0.067] \\
+Qwen3-TTS 1.7B & ru$\rightarrow$zh & 100 & 61 & -0.090 [-0.103, -0.076] \\
+Qwen3-TTS 1.7B & zh$\rightarrow$en & 100 & 78 & -0.053 [-0.067, -0.039] \\
+Qwen3-TTS 1.7B & zh$\rightarrow$ru & 100 & 94 & -0.117 [-0.132, -0.100] \\
+Spark-TTS 0.5B & en$\rightarrow$ru & 0 & 0 & -- \\
+Spark-TTS 0.5B & en$\rightarrow$zh & 100 & 26 & -0.050 [-0.067, -0.031] \\
+Spark-TTS 0.5B & ru$\rightarrow$en & 99 & 73 & -0.105 [-0.124, -0.088] \\
+Spark-TTS 0.5B & ru$\rightarrow$zh & 100 & 59 & -0.080 [-0.093, -0.065] \\
+Spark-TTS 0.5B & zh$\rightarrow$en & 100 & 76 & -0.033 [-0.046, -0.019] \\
+Spark-TTS 0.5B & zh$\rightarrow$ru & 0 & 0 & -- \\
+XTTS v2 & en$\rightarrow$ru & 100 & 72 & -0.115 [-0.133, -0.097] \\
+XTTS v2 & en$\rightarrow$zh & 100 & 58 & -0.068 [-0.079, -0.054] \\
+XTTS v2 & ru$\rightarrow$en & 100 & 77 & -0.097 [-0.119, -0.078] \\
+XTTS v2 & ru$\rightarrow$zh & 100 & 62 & -0.085 [-0.099, -0.071] \\
+XTTS v2 & zh$\rightarrow$en & 100 & 78 & -0.031 [-0.048, -0.012] \\
+XTTS v2 & zh$\rightarrow$ru & 100 & 73 & -0.088 [-0.110, -0.064] \\
 \bottomrule
 \end{longtable}
 

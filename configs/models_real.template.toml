@@ -4,22 +4,32 @@ description = "Template with nondummy TTS model backends. Replace voice paths wi
 [[models]]
 id = "xtts_v2"
 backend = "coqui_xtts"
-params = { model_name = "tts_models/multilingual/multi-dataset/xtts_v2" }
+params = { model_name = "tts_models/multilingual/multi-dataset/xtts_v2", model_sha256 = "c7ea20001c6a0a841c77e252d8409f6a74fb423e79b3206a0771ba5989776187", config_sha256 = "ef262b1454dd2a77e1461b0b2cd53e19b8a7624cc131b837d36df67356bc75e8", vocab_sha256 = "928260878a59da8a72a2a5b7687fea29d5106137669d90945430fe17e415304a", speakers_sha256 = "f0f6137c19a4eab0cbbe4c99b5babacf68b1746e50da90807708c10e645b943b" }
 
 [[models]]
 id = "f5tts_v1_base"
 backend = "f5_tts"
-params = { model = "F5TTS_v1_Base", ref_text_mode = "transcript", nfe_step = 32, cfg_strength = 2.0 }
+params = { model = "F5TTS_v1_Base", checkpoint_revision = "84e5a410d9cead4de2f847e7c9369a6440bdfaca", vocoder_revision = "0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21", ref_text_mode = "transcript", nfe_step = 32, cfg_strength = 2.0 }
 
 [[models]]
 id = "qwentts_12hz_0.6b_base"
 backend = "qwen_tts"
-params = { model = "Qwen/Qwen3-TTS-12Hz-0.6B-Base", ref_text_mode = "transcript", dtype = "bfloat16" }
+params = { model = "Qwen/Qwen3-TTS-12Hz-0.6B-Base", revision = "5d83992436eae1d760afd27aff78a71d676296fc", ref_text_mode = "transcript", dtype = "bfloat16" }
 
 [[models]]
 id = "qwentts_12hz_1.7b_base"
 backend = "qwen_tts"
-params = { model = "Qwen/Qwen3-TTS-12Hz-1.7B-Base", ref_text_mode = "transcript", dtype = "bfloat16" }
+params = { model = "Qwen/Qwen3-TTS-12Hz-1.7B-Base", revision = "fd4b254389122332181a7c3db7f27e918eec64e3", ref_text_mode = "transcript", dtype = "bfloat16" }
+
+[[models]]
+id = "cosyvoice3_0_5b_2512"
+backend = "cosyvoice"
+params = { model_name = "FunAudioLLM/Fun-CosyVoice3-0.5B-2512", artifact_tree_sha256 = "3f05b0236c11518e035c73996e60a2055d31d48fd2b52f3514444fc6157ada46", ref_text_mode = "transcript", stream = false, speed = 1.0, text_frontend = true }
+
+[[models]]
+id = "spark_tts_0_5b"
+backend = "spark_tts"
+params = { model_name = "pretrained_models/Spark-TTS-0.5B", revision = "642071559bfc6346c2359d19dcb6be3f9dd8a05d", ref_text_mode = "empty", temperature = 0.8, top_k = 50, top_p = 0.95 }
 
 [[models]]
 id = "f5tts_cli"
@@ -29,17 +39,22 @@ params = { command = ["f5-tts_infer-cli", "--model", "F5TTS_v1_Base", "--ref_aud
 [[metrics]]
 id = "asr_error"
 backend = "faster_whisper_asr"
-params = { vad_filter = true }
+params = { model_size = "medium", model_revision = "08e178d48790749d25932bbc082711ddcfdfbc4f", vad_filter = true, beam_size = 5, cpu_model_size = "small", cpu_model_revision = "536b0662742c02347bc0e980a01041f333bce120", cpu_compute_type = "int8" }
 
 [[metrics]]
 id = "target_language_id"
 backend = "faster_whisper_lid"
-params = { vad_filter = true }
+params = { model_size = "medium", model_revision = "08e178d48790749d25932bbc082711ddcfdfbc4f", vad_filter = true, cpu_model_size = "small", cpu_model_revision = "536b0662742c02347bc0e980a01041f333bce120", cpu_compute_type = "int8" }
 
 [[metrics]]
 id = "speaker_similarity"
 backend = "speechbrain_speaker_similarity"
-params = {}
+params = { model_id = "speechbrain/spkrec-ecapa-voxceleb", model_revision = "0f99f2d0ebe89ac095bcc5903c4dd8f72b367286" }
+
+[[metrics]]
+id = "source_language_similarity"
+backend = "speechbrain_language_similarity"
+params = { model_id = "speechbrain/lang-id-voxlingua107-ecapa", model_revision = "0253049ae131d6a4be1c4f0d8b0ff483a0f8c8e9" }
 
 [[voices]]
 id = "replace_ru_voice"

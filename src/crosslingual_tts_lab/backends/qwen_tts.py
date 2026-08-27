@@ -17,6 +17,7 @@ class QwenTTSBackend:
     params: dict[str, Any] = field(default_factory=dict)
     name: str = "qwen_tts"
     _model: Any = field(default=None, init=False, repr=False)
+    _model_source: str | None = field(default=None, init=False, repr=False)
 
     def synthesize(self, job: GenerationJob, output_dir: Path) -> SynthesisResult:
         if not job.voice.audio_path.exists():
@@ -59,6 +60,9 @@ class QwenTTSBackend:
                 "target_language": job.target.language,
                 "mapped_language": language,
                 "device": self._device(),
+                "checkpoint_revision": self.params.get("revision"),
+                "resolved_model_source": self._model_source or self._model_name(),
+                "inference_config": self._inference_config(x_vector_only_mode),
                 "synthetic_placeholder": False,
             },
         )
@@ -87,12 +91,37 @@ class QwenTTSBackend:
             else:
                 dtype = torch.bfloat16
 
+            load_kwargs = {
+                "device_map": self._device_map(),
+                "dtype": dtype,
+            }
             self._model = Qwen3TTSModel.from_pretrained(
-                self._model_name(),
-                device_map=self._device_map(),
-                dtype=dtype,
+                self._resolve_model_source(), **load_kwargs
             )
         return self._model
+
+    def _resolve_model_source(self) -> str:
+        if self._model_source is not None:
+            return self._model_source
+        revision = self.params.get("revision")
+        if revision:
+            try:
+                from huggingface_hub import snapshot_download
+            except ModuleNotFoundError as exc:
+                raise RuntimeError(
+                    "a pinned Qwen3-TTS checkpoint requires the 'huggingface-hub' package"
+                ) from exc
+            # The qwen-tts wrapper forwards revision only to AutoModel, not to
+            # AutoProcessor. Resolving the complete immutable snapshot first
+            # pins model, processor, tokenizer, and generation configuration.
+            self._model_source = snapshot_download(
+                repo_id=self._model_name(),
+                revision=str(revision),
+                cache_dir=self.params.get("hf_cache_dir"),
+            )
+        else:
+            self._model_source = self._model_name()
+        return self._model_source
 
     def _reference_text(self, job: GenerationJob) -> str:
         mode = str(self.params.get("ref_text_mode", "transcript"))
@@ -118,6 +147,15 @@ class QwenTTSBackend:
         if device == "cuda":
             return "cuda:0"
         return device
+
+    def _inference_config(self, x_vector_only_mode: bool) -> dict[str, Any]:
+        return {
+            "ref_text_mode": str(self.params.get("ref_text_mode", "transcript")),
+            "x_vector_only_mode": x_vector_only_mode,
+            "dtype": str(self.params.get("dtype") or "bfloat16"),
+            "device_map": self._device_map(),
+            "generation_source": "checkpoint generation_config.json",
+        }
 
 
 def _map_language(lang_code: str) -> str:

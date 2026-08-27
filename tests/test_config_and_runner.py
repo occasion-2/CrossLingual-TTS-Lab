@@ -4,6 +4,7 @@ import json
 import sys
 import tarfile
 import tempfile
+import tomllib
 import unittest
 from io import BytesIO
 from pathlib import Path
@@ -18,6 +19,7 @@ from crosslingual_tts_lab.common_voice_mdc import (
     parse_locale_filters,
     _total_size_from_content_range,
 )
+from crosslingual_tts_lab.cli import _calibrate, _parse_key_values
 from crosslingual_tts_lab.config import load_config
 from crosslingual_tts_lab.config import (
     BenchmarkConfig,
@@ -34,6 +36,7 @@ from crosslingual_tts_lab.open_datasets import (
     build_local_common_voice_config,
     _fleurs_dataset_code,
     _normalize_text,
+    _real_metric_specs,
     _select_speaker_voice_rows,
     _select_target_rows,
     parse_language_requests,
@@ -87,6 +90,24 @@ class ConfigAndRunnerTests(unittest.TestCase):
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(manifest["summary"]["jobs"], 3)
             self.assertEqual(manifest["summary"]["cross_lingual_jobs"], 3)
+            self.assertEqual(
+                manifest["reproducibility"]["model_specs"][0]["backend"],
+                "dummy",
+            )
+            self.assertEqual(
+                manifest["reproducibility"]["configuration_role"],
+                "requested_runtime_configuration",
+            )
+            self.assertIn("python_version", manifest["reproducibility"])
+            self.assertEqual(manifest["samples"][0]["model"]["params"], {})
+            self.assertEqual(
+                manifest["samples"][0]["synthesis_metadata"]["synthesis_provenance"],
+                "generated_current_config",
+            )
+            self.assertIn(
+                "model_config_fingerprint",
+                manifest["samples"][0]["synthesis_metadata"],
+            )
             self.assertTrue(manifest_path.with_name("report.md").exists())
             for sample in manifest["samples"]:
                 self.assertTrue(sample["metrics"])
@@ -453,7 +474,131 @@ class ConfigAndRunnerTests(unittest.TestCase):
 
         self.assertEqual(
             {model.backend for model in config.models},
-            {"coqui_xtts", "f5_tts", "qwen_tts", "external_command"},
+            {
+                "coqui_xtts",
+                "f5_tts",
+                "qwen_tts",
+                "cosyvoice",
+                "spark_tts",
+                "external_command",
+            },
+        )
+        self.assertEqual(len(config.metrics), 4)
+        self.assertTrue(all(metric.params.get("model_revision") for metric in config.metrics))
+
+    def test_generated_dataset_metrics_pin_evaluator_revisions(self) -> None:
+        metrics = _real_metric_specs()
+        by_backend = {metric["backend"]: metric["params"] for metric in metrics}
+
+        self.assertEqual(
+            by_backend["faster_whisper_asr"]["model_revision"],
+            "08e178d48790749d25932bbc082711ddcfdfbc4f",
+        )
+        self.assertEqual(
+            by_backend["faster_whisper_asr"]["cpu_model_revision"],
+            "536b0662742c02347bc0e980a01041f333bce120",
+        )
+        self.assertEqual(
+            by_backend["speechbrain_speaker_similarity"]["model_revision"],
+            "0f99f2d0ebe89ac095bcc5903c4dd8f72b367286",
+        )
+        self.assertEqual(
+            by_backend["speechbrain_language_similarity"]["model_revision"],
+            "0253049ae131d6a4be1c4f0d8b0ff483a0f8c8e9",
+        )
+
+    def test_metric_revision_selection_supports_cpu_fallback(self) -> None:
+        from crosslingual_tts_lab.metrics.asr import FasterWhisperASRMetric
+        from crosslingual_tts_lab.metrics.leakage import SpeechBrainLanguageSimilarityMetric
+        from crosslingual_tts_lab.metrics.speaker import SpeechBrainSpeakerSimilarityMetric
+
+        profile = DeviceProfile(device="cuda", cuda_available=True)
+        asr = FasterWhisperASRMetric(
+            "asr",
+            {"model_revision": "medium-rev", "cpu_model_revision": "small-rev"},
+            profile,
+        )
+        self.assertEqual(asr._model_revision(), "medium-rev")
+        asr._forced_model_size = "small"
+        self.assertEqual(asr._model_revision(), "small-rev")
+        cpu_asr = FasterWhisperASRMetric(
+            "asr",
+            {
+                "model_size": "medium",
+                "model_revision": "medium-rev",
+                "cpu_model_size": "small",
+                "cpu_model_revision": "small-rev",
+                "cpu_compute_type": "int8",
+            },
+            DeviceProfile(device="cpu", cuda_available=False),
+        )
+        self.assertEqual(cpu_asr._model_size(), "small")
+        self.assertEqual(cpu_asr._model_revision(), "small-rev")
+        self.assertEqual(cpu_asr._compute_type(), "int8")
+        self.assertEqual(
+            SpeechBrainSpeakerSimilarityMetric(
+                "speaker", {"model_revision": "speaker-rev"}, profile
+            )._model_revision(),
+            "speaker-rev",
+        )
+        self.assertEqual(
+            SpeechBrainLanguageSimilarityMetric(
+                "leakage", {"revision": "language-rev"}, profile
+            )._model_revision(),
+            "language-rev",
+        )
+
+    def test_calibration_forwards_pinned_speaker_evaluator(self) -> None:
+        from unittest.mock import patch
+
+        with patch("crosslingual_tts_lab.cli.compute_calibration") as compute:
+            result = _calibrate(
+                Path("/tmp/calibration-run"),
+                "speechbrain/spkrec-ecapa-voxceleb",
+                "immutable-revision",
+                "cuda:0",
+            )
+
+        self.assertEqual(result, 0)
+        compute.assert_called_once_with(
+            Path("/tmp/calibration-run"),
+            model_id="speechbrain/spkrec-ecapa-voxceleb",
+            model_revision="immutable-revision",
+            device="cuda:0",
+        )
+
+    def test_paper_snapshot_covers_models_and_evaluators(self) -> None:
+        snapshot = tomllib.loads(
+            Path("configs/paper_model_snapshot.toml").read_text(encoding="utf-8")
+        )
+
+        self.assertEqual(len(snapshot["models"]), 6)
+        self.assertEqual(len(snapshot["evaluators"]), 3)
+        self.assertTrue(
+            all(item["provenance_status"] == "reconstructed" for item in snapshot["evaluators"])
+        )
+        leakage = next(
+            item
+            for item in snapshot["evaluators"]
+            if item["id"] == "language_centroid_leakage_proxy"
+        )
+        self.assertEqual(
+            leakage["centroid_sha256"],
+            "9adca9f8ef996c21f5f3473359bfc7e3b0d852d19139b0af5049621514373d91",
+        )
+
+    def test_model_param_parser_preserves_scalar_types(self) -> None:
+        self.assertEqual(
+            _parse_key_values(
+                ["enabled=true", "disabled=false", "steps=32", "temperature=0.8", "model=repo/id"]
+            ),
+            {
+                "enabled": True,
+                "disabled": False,
+                "steps": 32,
+                "temperature": 0.8,
+                "model": "repo/id",
+            },
         )
 
     def test_backend_registry_has_nondummy_backends(self) -> None:
@@ -615,6 +760,91 @@ class ConfigAndRunnerTests(unittest.TestCase):
                     x_vector_only_mode=True,
                 )
 
+    def test_qwen_revision_resolves_complete_hub_snapshot(self) -> None:
+        from unittest.mock import patch
+        from crosslingual_tts_lab.backends.qwen_tts import QwenTTSBackend
+
+        backend = QwenTTSBackend({"model": "org/model", "revision": "immutable"})
+        with patch("huggingface_hub.snapshot_download", return_value="/cache/snapshot") as download:
+            self.assertEqual(backend._resolve_model_source(), "/cache/snapshot")
+            self.assertEqual(backend._resolve_model_source(), "/cache/snapshot")
+
+        download.assert_called_once_with(
+            repo_id="org/model",
+            revision="immutable",
+            cache_dir=None,
+        )
+
+    def test_f5_revision_resolves_checkpoint_file(self) -> None:
+        from unittest.mock import patch
+        from crosslingual_tts_lab.backends.f5_tts import F5TTSBackend
+
+        backend = F5TTSBackend({"checkpoint_revision": "immutable"})
+        with patch("huggingface_hub.hf_hub_download", return_value="/cache/model.safetensors") as download:
+            self.assertEqual(backend._resolve_checkpoint_file(), "/cache/model.safetensors")
+            self.assertEqual(backend._resolve_checkpoint_file(), "/cache/model.safetensors")
+
+        download.assert_called_once_with(
+            repo_id="SWivid/F5-TTS",
+            filename="F5TTS_v1_Base/model_1250000.safetensors",
+            revision="immutable",
+            cache_dir=None,
+        )
+
+    def test_f5_revision_resolves_complete_vocoder_snapshot(self) -> None:
+        from unittest.mock import patch
+        from crosslingual_tts_lab.backends.f5_tts import F5TTSBackend
+
+        backend = F5TTSBackend({"vocoder_revision": "immutable"})
+        with patch("huggingface_hub.snapshot_download", return_value="/cache/vocoder") as download:
+            self.assertEqual(backend._resolve_vocoder_path(), "/cache/vocoder")
+            self.assertEqual(backend._resolve_vocoder_path(), "/cache/vocoder")
+
+        download.assert_called_once_with(
+            repo_id="charactr/vocos-mel-24khz",
+            revision="immutable",
+            cache_dir=None,
+        )
+
+    def test_cosyvoice3_load_kwargs_omit_unsupported_load_jit(self) -> None:
+        from crosslingual_tts_lab.backends.cosyvoice import CosyVoiceBackend
+
+        backend = CosyVoiceBackend({"load_jit": True, "load_vllm": False})
+        kwargs = backend._model_load_kwargs("Fun-CosyVoice3-0.5B", "/cache/model")
+
+        self.assertNotIn("load_jit", kwargs)
+        self.assertIn("load_vllm", kwargs)
+
+    def test_xtts_artifact_hash_verification(self) -> None:
+        import hashlib
+        from types import SimpleNamespace
+        from crosslingual_tts_lab.backends.coqui_xtts import CoquiXTTSBackend
+
+        payloads = {
+            "model.pth": b"model",
+            "config.json": b"config",
+            "vocab.json": b"vocab",
+            "speakers_xtts.pth": b"speakers",
+        }
+        params = {
+            "model_name": "tts_models/multilingual/multi-dataset/xtts_v2",
+            "model_sha256": hashlib.sha256(payloads["model.pth"]).hexdigest(),
+            "config_sha256": hashlib.sha256(payloads["config.json"]).hexdigest(),
+            "vocab_sha256": hashlib.sha256(payloads["vocab.json"]).hexdigest(),
+            "speakers_sha256": hashlib.sha256(payloads["speakers_xtts.pth"]).hexdigest(),
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp) / "tts_models--multilingual--multi-dataset--xtts_v2"
+            artifact_dir.mkdir()
+            for filename, payload in payloads.items():
+                (artifact_dir / filename).write_bytes(payload)
+            backend = CoquiXTTSBackend(params)
+            backend._verify_model_artifacts(
+                SimpleNamespace(manager=SimpleNamespace(output_prefix=tmp))
+            )
+
+        self.assertTrue(backend._artifact_hashes_verified)
+
     def test_cosyvoice_backend_synthesizes_using_mock(self) -> None:
         import sys
         from unittest.mock import MagicMock, patch
@@ -737,6 +967,31 @@ class ConfigAndRunnerTests(unittest.TestCase):
                         }
                     ],
                 )
+                self.assertEqual(
+                    result.metadata["inference_config"]["seed_status"],
+                    "uncontrolled",
+                )
+                self.assertIsNone(result.metadata["inference_config"]["seed"])
+
+    def test_spark_tts_verifies_local_huggingface_revision(self) -> None:
+        from crosslingual_tts_lab.backends.spark_tts import SparkTTSBackend
+
+        revision = "immutable"
+        with tempfile.TemporaryDirectory() as tmp:
+            model_dir = Path(tmp)
+            for relative in (
+                ".cache/huggingface/download/LLM/model.safetensors.metadata",
+                ".cache/huggingface/download/BiCodec/model.safetensors.metadata",
+            ):
+                metadata = model_dir / relative
+                metadata.parent.mkdir(parents=True, exist_ok=True)
+                metadata.write_text(f"{revision}\nweight-hash\n", encoding="utf-8")
+            backend = SparkTTSBackend(
+                {"model_name": str(model_dir), "revision": revision}
+            )
+            backend._verify_local_checkpoint_revision()
+
+        self.assertTrue(backend._checkpoint_revision_verified)
 
     def test_asr_adapters_normalize_correctly(self) -> None:
         from crosslingual_tts_lab.text_metrics import get_asr_adapter

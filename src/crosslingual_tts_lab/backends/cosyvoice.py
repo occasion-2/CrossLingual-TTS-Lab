@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -16,6 +18,9 @@ class CosyVoiceBackend:
     params: dict[str, Any] = field(default_factory=dict)
     name: str = "cosyvoice"
     _model: Any = field(default=None, init=False, repr=False)
+    _model_source: str | None = field(default=None, init=False, repr=False)
+    _artifact_tree_verified: bool | None = field(default=None, init=False, repr=False)
+    _source_revision_verified: bool | None = field(default=None, init=False, repr=False)
 
     def synthesize(self, job: GenerationJob, output_dir: Path) -> SynthesisResult:
         if not job.voice.audio_path.exists():
@@ -33,7 +38,14 @@ class CosyVoiceBackend:
             prompt_text = "You are a helpful assistant.<|endofprompt|>" + prompt_text
 
         chunks = []
-        for result in model.inference_zero_shot(job.target.text, prompt_text, prompt_speech):
+        for result in model.inference_zero_shot(
+            job.target.text,
+            prompt_text,
+            prompt_speech,
+            stream=bool(self.params.get("stream", False)),
+            speed=float(self.params.get("speed", 1.0)),
+            text_frontend=bool(self.params.get("text_frontend", True)),
+        ):
             if isinstance(result, dict) and "tts_speech" in result:
                 val = result["tts_speech"]
             elif hasattr(result, "tts_speech"):
@@ -64,6 +76,22 @@ class CosyVoiceBackend:
                 "ref_text_mode": self.params.get("ref_text_mode", "transcript"),
                 "target_language": job.target.language,
                 "device": self._device(),
+                "model_revision": self.params.get("revision"),
+                "source_revision": self.params.get("source_revision"),
+                "source_revision_verified": self._source_revision_verified,
+                "resolved_model_source": self._model_source or self._model_name(),
+                "artifact_tree_verified": self._artifact_tree_verified,
+                "inference_config": {
+                    "prompt_mode": "zero_shot_with_transcript",
+                    "system_prompt_prefix": "You are a helpful assistant.<|endofprompt|>",
+                    "stream": bool(self.params.get("stream", False)),
+                    "speed": float(self.params.get("speed", 1.0)),
+                    "text_frontend": bool(self.params.get("text_frontend", True)),
+                    "fp16": bool(self.params.get("fp16", False)),
+                    "load_jit": bool(self.params.get("load_jit", False)),
+                    "load_trt": bool(self.params.get("load_trt", False)),
+                    "load_vllm": bool(self.params.get("load_vllm", False)),
+                },
                 "synthetic_placeholder": False,
             },
         )
@@ -74,6 +102,7 @@ class CosyVoiceBackend:
                 import sys
                 from pathlib import Path
                 project_root = Path(__file__).resolve().parent.parent.parent.parent
+                self._verify_source_revision(project_root / "CosyVoice")
                 cosy_path = str((project_root / "CosyVoice").resolve())
                 if cosy_path not in sys.path:
                     sys.path.insert(0, cosy_path)
@@ -87,8 +116,83 @@ class CosyVoiceBackend:
                     "Make sure CosyVoice is installed in the current environment."
                 ) from exc
 
-            self._model = AutoModel(model_dir=self._model_name())
+            model_name = self._model_name()
+            model_source = self._resolve_model_source()
+            self._model = AutoModel(**self._model_load_kwargs(model_name, model_source))
         return self._model
+
+    def _model_load_kwargs(self, model_name: str, model_source: str) -> dict[str, Any]:
+        load_kwargs: dict[str, Any] = {
+            "model_dir": model_source,
+            "load_trt": bool(self.params.get("load_trt", False)),
+            "fp16": bool(self.params.get("fp16", False)),
+        }
+        # CosyVoice's constructors are version-specific: CosyVoice3 omits
+        # load_jit, while only CosyVoice2/3 accept load_vllm.
+        if "CosyVoice3" in model_name:
+            load_kwargs["load_vllm"] = bool(self.params.get("load_vllm", False))
+        elif "CosyVoice2" in model_name:
+            load_kwargs["load_jit"] = bool(self.params.get("load_jit", False))
+            load_kwargs["load_vllm"] = bool(self.params.get("load_vllm", False))
+        else:
+            load_kwargs["load_jit"] = bool(self.params.get("load_jit", False))
+        return load_kwargs
+
+    def _verify_source_revision(self, checkout: Path) -> None:
+        expected = self.params.get("source_revision")
+        if not expected:
+            self._source_revision_verified = None
+            return
+        try:
+            actual = subprocess.check_output(
+                ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+                text=True,
+            ).strip()
+        except (OSError, subprocess.CalledProcessError) as exc:
+            raise RuntimeError(f"cannot verify CosyVoice source revision in {checkout}") from exc
+        if actual != str(expected):
+            raise RuntimeError(
+                f"CosyVoice source revision mismatch: expected {expected}, found {actual}"
+            )
+        self._source_revision_verified = True
+
+    def _resolve_model_source(self) -> str:
+        if self._model_source is not None:
+            return self._model_source
+        model_name = self._model_name()
+        expected_tree = self.params.get("artifact_tree_sha256")
+        if Path(model_name).exists():
+            model_source = Path(model_name)
+        elif expected_tree:
+            try:
+                from modelscope import snapshot_download
+            except ModuleNotFoundError as exc:
+                raise RuntimeError(
+                    "a hash-pinned CosyVoice checkpoint requires the 'modelscope' package"
+                ) from exc
+            model_source = Path(
+                snapshot_download(
+                    model_name,
+                    revision=str(self.params.get("revision", "master")),
+                )
+            )
+        else:
+            self._artifact_tree_verified = None
+            self._model_source = model_name
+            return self._model_source
+
+        if expected_tree:
+            actual_tree = _artifact_tree_sha256(model_source)
+            if actual_tree != str(expected_tree):
+                raise RuntimeError(
+                    "CosyVoice artifact tree hash mismatch: "
+                    f"expected {expected_tree}, found {actual_tree}"
+                )
+            self._artifact_tree_verified = True
+        else:
+            self._artifact_tree_verified = None
+        self._model_source = str(model_source)
+        return self._model_source
 
     def _reference_text(self, job: GenerationJob) -> str:
         mode = str(self.params.get("ref_text_mode", "transcript"))
@@ -118,3 +222,23 @@ class CosyVoiceBackend:
             return int(configured)
 
         raise ValueError(f"invalid CosyVoice sample_rate: {configured!r}")
+
+
+def _artifact_tree_sha256(root: Path) -> str:
+    tree_digest = hashlib.sha256()
+    artifacts = sorted(
+        (
+            path
+            for path in root.rglob("*")
+            if path.is_file() and path.name not in {".mdl", ".msc", ".mv"}
+        ),
+        key=lambda path: path.relative_to(root).as_posix(),
+    )
+    for artifact in artifacts:
+        artifact_digest = hashlib.sha256()
+        with artifact.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                artifact_digest.update(chunk)
+        relative_path = artifact.relative_to(root).as_posix()
+        tree_digest.update(f"{artifact_digest.hexdigest()}  ./{relative_path}\n".encode())
+    return tree_digest.hexdigest()

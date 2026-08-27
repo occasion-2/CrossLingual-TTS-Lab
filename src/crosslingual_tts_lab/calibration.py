@@ -5,7 +5,17 @@ from itertools import combinations
 from pathlib import Path
 
 
-def compute_calibration(run_dir: Path) -> None:
+DEFAULT_SPEAKER_MODEL_ID = "speechbrain/spkrec-ecapa-voxceleb"
+DEFAULT_SPEAKER_MODEL_REVISION = "0f99f2d0ebe89ac095bcc5903c4dd8f72b367286"
+
+
+def compute_calibration(
+    run_dir: Path,
+    *,
+    model_id: str = DEFAULT_SPEAKER_MODEL_ID,
+    model_revision: str = DEFAULT_SPEAKER_MODEL_REVISION,
+    device: str = "cuda:0",
+) -> None:
     manifest_path = run_dir / "manifest.json"
     if not manifest_path.exists():
         raise FileNotFoundError(f"No manifest found at {manifest_path}")
@@ -14,13 +24,15 @@ def compute_calibration(run_dir: Path) -> None:
         manifest = json.load(f)
         
     print("Loading ECAPA-TDNN...")
-    from speechbrain.inference.speaker import EncoderClassifier
-    import torch
     import numpy as np
-    
+    import torch
+    from speechbrain.inference.speaker import EncoderClassifier
+    from speechbrain.utils.fetching import FetchConfig
+
     classifier = EncoderClassifier.from_hparams(
-        source="speechbrain/spkrec-ecapa-voxceleb",
-        run_opts={"device": "cuda:0"}
+        source=model_id,
+        run_opts={"device": device},
+        fetch_config=FetchConfig(revision=model_revision, allow_updates=True),
     )
     
     def encode_file(path: Path):
@@ -115,8 +127,11 @@ def compute_calibration(run_dir: Path) -> None:
             gen_vs_wrong_ref.append(sim)
             
     def get_stats(arr):
-        if not arr: return "N/A"
+        if not arr:
+            return "N/A"
         mean = np.mean(arr)
+        # Population SD describes all pairs in this fixed calibration slice;
+        # it is not a confidence interval.
         std = np.std(arr)
         return f"{mean:.3f} ± {std:.3f} (n={len(arr)})"
         
@@ -124,7 +139,10 @@ def compute_calibration(run_dir: Path) -> None:
     
     lines = [
         "### Speaker Similarity Calibration (ECAPA-TDNN)",
-        "| Pair type | Speaker Sim |",
+        f"Model: `{model_id}@{model_revision}` on `{device}`.",
+        "Values are mean ± population SD (ddof=0), not confidence intervals.",
+        "",
+        "| Pair type | Speaker Sim (mean ± SD) |",
         "|---|---|",
         f"| same speaker real-real (known speaker ID) | {get_stats(known_same_speaker_real_real)} |",
         f"| same speaker cross-language (known speaker ID) | {get_stats(known_same_speaker_cross_language)} |",

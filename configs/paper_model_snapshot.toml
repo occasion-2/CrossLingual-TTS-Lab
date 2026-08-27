@@ -1,0 +1,152 @@
+# Best-available synthesis/evaluator snapshot for the FLEURS paper experiment.
+#
+# Waveforms were generated on 2026-06-26--27 and the surviving manifests were
+# finalized on 2026-06-28. Hub repositories whose latest commit predates that
+# run and whose weights have not changed since can be identified exactly, but
+# those reconstructed revisions are not falsely labeled as run-attested.
+# Local artifact hashes are recorded for non-Hugging-Face loaders.
+# Stochastic seeds that were not set in the original run are marked explicitly;
+# those systems are checkpoint-reproducible but not waveform-bit-reproducible.
+
+snapshot_date = "2026-06-28"
+torch = "2.11.0+cu130"
+cuda_runtime_reported_by_torch = "13.0"
+gpu = "NVIDIA GeForce RTX 4080 Laptop GPU"
+python = "3.11"
+
+[[models]]
+id = "qwen3_tts_0_6b_base"
+paper_name = "Qwen3-TTS 0.6B"
+backend = "qwen_tts"
+package = "qwen-tts==0.1.1"
+checkpoint = "Qwen/Qwen3-TTS-12Hz-0.6B-Base"
+revision = "5d83992436eae1d760afd27aff78a71d676296fc"
+weight_sha256 = "180b3b10eb1c9f1b4db7806d5475bae3071c0243c299d49926bab1da3b6946f6"
+provenance_status = "reconstructed"
+provenance_source = "legacy manifest model ID plus immutable official hub snapshot"
+provenance_note = "Model ID, x-vector-only mode, and CUDA are run-attested; revision and hash were reconstructed because the original manifest did not store them."
+params = { ref_text_mode = "empty", x_vector_only_mode = true, dtype = "bfloat16", device_map = "cuda:0" }
+generation = { do_sample = true, repetition_penalty = 1.05, temperature = 0.9, top_p = 1.0, top_k = 50, subtalker_dosample = true, subtalker_temperature = 0.9, subtalker_top_p = 1.0, subtalker_top_k = 50, max_new_tokens = 8192 }
+seed = "unset"
+
+[[models]]
+id = "qwen3_tts_1_7b_base"
+paper_name = "Qwen3-TTS 1.7B"
+backend = "qwen_tts"
+package = "qwen-tts==0.1.1"
+checkpoint = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
+revision = "fd4b254389122332181a7c3db7f27e918eec64e3"
+weight_sha256 = "38fc7fc51c5e776e840414b6fd443962e9411b9654888fd7913e4da643cb857c"
+provenance_status = "reconstructed"
+provenance_source = "legacy manifest model ID plus immutable official hub snapshot"
+provenance_note = "Model ID, x-vector-only mode, and CUDA are run-attested; revision and hash were reconstructed because the original manifest did not store them."
+params = { ref_text_mode = "empty", x_vector_only_mode = true, dtype = "bfloat16", device_map = "cuda:0" }
+generation = { do_sample = true, repetition_penalty = 1.05, temperature = 0.9, top_p = 1.0, top_k = 50, subtalker_dosample = true, subtalker_temperature = 0.9, subtalker_top_p = 1.0, subtalker_top_k = 50, max_new_tokens = 8192 }
+seed = "unset"
+
+[[models]]
+id = "f5tts_v1_base"
+paper_name = "F5-TTS v1 Base"
+backend = "f5_tts"
+package = "f5-tts==1.1.20"
+checkpoint = "SWivid/F5-TTS/F5TTS_v1_Base/model_1250000.safetensors"
+revision = "84e5a410d9cead4de2f847e7c9369a6440bdfaca"
+weight_sha256 = "670900fd14e6c458b95da6e9ed317cdb20dbaf7a1c02ac06a05475a9d32b6a38"
+provenance_status = "reconstructed"
+provenance_source = "legacy manifest model alias plus immutable official hub snapshot"
+provenance_note = "The F5TTS_v1_Base alias, empty reference text, and CUDA are run-attested; immutable revision and hash were reconstructed after the run."
+params = { ref_text_mode = "empty", ode_method = "euler", use_ema = true, nfe_step = 32, cfg_strength = 2.0, sway_sampling_coef = -1.0, speed = 1.0, remove_silence = false }
+vocoder = "charactr/vocos-mel-24khz"
+vocoder_revision = "0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21"
+vocoder_weight_sha256 = "97ec976ad1fd67a33ab2682d29c0ac7df85234fae875aefcc5fb215681a91b2a"
+sample_rate = 24000
+seed = "unset; f5-tts chooses a random seed per call"
+
+[[models]]
+id = "xtts_v2"
+paper_name = "XTTS v2"
+backend = "coqui_xtts"
+package = "TTS==0.22.0"
+checkpoint = "tts_models/multilingual/multi-dataset/xtts_v2"
+local_model_sha256 = "c7ea20001c6a0a841c77e252d8409f6a74fb423e79b3206a0771ba5989776187"
+config_sha256 = "ef262b1454dd2a77e1461b0b2cd53e19b8a7624cc131b837d36df67356bc75e8"
+vocab_sha256 = "928260878a59da8a72a2a5b7687fea29d5106137669d90945430fe17e415304a"
+speakers_sha256 = "f0f6137c19a4eab0cbbe4c99b5babacf68b1746e50da90807708c10e645b943b"
+provenance_status = "reconstructed"
+provenance_source = "legacy manifest model alias plus surviving local Coqui cache"
+provenance_note = "The model alias is run-attested; artifact hashes and decoder defaults were reconstructed from the surviving cache."
+params = { temperature = 0.75, top_k = 50, top_p = 0.85, repetition_penalty = 5.0, length_penalty = 1.0, sample_rate = 24000 }
+seed = "unset"
+device_note = "The resumed manifest mixes old CPU metadata and newer rows without a device field; no single run-attested device can be claimed."
+
+[[models]]
+id = "cosyvoice3_0_5b_2512"
+paper_name = "CosyVoice3 0.5B (2512)"
+backend = "cosyvoice"
+checkpoint = "FunAudioLLM/Fun-CosyVoice3-0.5B-2512"
+source_commit = "074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc"
+matcha_tts_commit = "dd9105b34bf2be2230f4aa1e4769fb586a3c824e"
+artifact_tree_sha256 = "3f05b0236c11518e035c73996e60a2055d31d48fd2b52f3514444fc6157ada46"
+flow_sha256 = "a6fab32a7825e5b0bc855ddd948f8db9370b0a786fbc249caa4595e95b608e4b"
+llm_sha256 = "69f43bd545131c30e98947fb360ea8b4dc9916d8e83dded7757c7ea4f5a24970"
+hift_sha256 = "b279d7641eb97ae55b3b540cfba4f953c26492a2df758328a89a4d007ab87a65"
+provenance_status = "reconstructed"
+provenance_source = "legacy manifest checkpoint ID plus surviving ModelScope cache and vendor checkout"
+provenance_note = "Checkpoint ID, transcript mode, and CUDA are run-attested; tree/weight hashes and source commits were reconstructed afterward."
+params = { ref_text_mode = "transcript", system_prompt_prefix = "You are a helpful assistant.<|endofprompt|>", stream = false, speed = 1.0, text_frontend = true, fp16 = false, load_jit = false, load_trt = false, load_vllm = false, sample_rate = 24000 }
+checkpoint_seed = 1986
+
+[[models]]
+id = "spark_tts_0_5b"
+paper_name = "Spark-TTS 0.5B"
+backend = "spark_tts"
+checkpoint = "SparkAudio/Spark-TTS-0.5B"
+revision = "642071559bfc6346c2359d19dcb6be3f9dd8a05d"
+source_commit = "2f1ea9082400547242641f5271b6f941c9f439d1"
+llm_sha256 = "54825baf0a2f6076eb3c78fa1d22a95aee225f59070a8b295f8169db860eb109"
+bicodec_sha256 = "e9940cd48d4446e4340ced82d234bf5618350dd9f5db900ebe47a4fdb03867ec"
+provenance_status = "reconstructed"
+provenance_source = "legacy manifest local model path plus surviving Hugging Face metadata and vendor checkout"
+provenance_note = "Local model path, empty prompt text, and CUDA are run-attested; immutable checkpoint/source revisions and hashes were reconstructed afterward."
+params = { ref_text_mode = "empty", temperature = 0.8, top_k = 50, top_p = 0.95, max_new_tokens = 3000, do_sample = true, sample_rate = 16000 }
+seed = "unset"
+
+[[evaluators]]
+id = "asr_error_and_target_language_id"
+backend = "faster_whisper"
+package = "faster-whisper==1.2.1"
+checkpoint = "Systran/faster-whisper-medium"
+revision = "08e178d48790749d25932bbc082711ddcfdfbc4f"
+params = { device = "cuda", compute_type = "float16", asr_beam_size = 5, lid_beam_size = 1, vad_filter = true }
+cpu_fallback_checkpoint = "Systran/faster-whisper-small"
+cpu_fallback_revision = "536b0662742c02347bc0e980a01041f333bce120"
+cpu_fallback_compute_type = "int8"
+provenance_status = "reconstructed"
+provenance_source = "legacy result details plus immutable official hub snapshots"
+provenance_note = "The medium alias, CUDA/float16 execution, beam settings, and VAD use are run-attested; immutable hub revisions were added after the legacy run."
+
+[[evaluators]]
+id = "speaker_similarity"
+backend = "speechbrain_speaker_similarity"
+package = "speechbrain==1.1.0"
+checkpoint = "speechbrain/spkrec-ecapa-voxceleb"
+revision = "0f99f2d0ebe89ac095bcc5903c4dd8f72b367286"
+similarity = "cosine"
+calibration_device = "cuda:0"
+calibration_summary = "mean_and_population_sd_ddof_0"
+provenance_status = "reconstructed"
+provenance_source = "legacy result details plus immutable official hub snapshot"
+provenance_note = "The model ID and CUDA device are run-attested; the immutable hub revision was added after the legacy run."
+
+[[evaluators]]
+id = "language_centroid_leakage_proxy"
+backend = "speechbrain_language_similarity"
+package = "speechbrain==1.1.0"
+checkpoint = "speechbrain/lang-id-voxlingua107-ecapa"
+revision = "0253049ae131d6a4be1c4f0d8b0ff483a0f8c8e9"
+centroid_file = "src/crosslingual_tts_lab/metrics/fleurs_centroids.json"
+centroid_sha256 = "9adca9f8ef996c21f5f3473359bfc7e3b0d852d19139b0af5049621514373d91"
+similarity = "cosine_source_minus_cosine_target"
+provenance_status = "reconstructed"
+provenance_source = "legacy result details, checked-in centroid artifact, and immutable official hub snapshot"
+provenance_note = "The model ID, centroid values, and CUDA device are run-attested or preserved in the repository; the immutable hub revision was added after the legacy run."

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import platform
 from dataclasses import asdict, dataclass, field
+from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import Protocol
 
@@ -53,20 +56,32 @@ class SynthesizingSampleSource:
 
     def sample_for(self, job: GenerationJob) -> GeneratedSample:
         audio_path = self.audio_dir / f"{job.id}.wav"
+        expected_fingerprint = _model_config_fingerprint(job)
         if job.id in self.existing_metadata:
-            metadata = self.existing_metadata[job.id]
+            metadata = dict(self.existing_metadata[job.id])
             if metadata.get("synthetic_placeholder", False) or (audio_path.exists() and audio_path.stat().st_size > 1000):
-                return GeneratedSample(
-                    job=job,
-                    audio_path=audio_path,
-                    synthesis_metadata=metadata,
-                )
+                recorded_fingerprint = metadata.get("model_config_fingerprint")
+                if recorded_fingerprint in (None, expected_fingerprint):
+                    metadata["synthesis_provenance"] = (
+                        "reused_verified_config"
+                        if recorded_fingerprint == expected_fingerprint
+                        else "reused_legacy_unverified_config"
+                    )
+                    metadata["requested_model_config_fingerprint"] = expected_fingerprint
+                    return GeneratedSample(
+                        job=job,
+                        audio_path=audio_path,
+                        synthesis_metadata=metadata,
+                    )
 
         result = self._backend_for(job).synthesize(job, self.audio_dir)
+        metadata = dict(result.metadata)
+        metadata["model_config_fingerprint"] = expected_fingerprint
+        metadata["synthesis_provenance"] = "generated_current_config"
         return GeneratedSample(
             job=job,
             audio_path=result.audio_path,
-            synthesis_metadata=result.metadata,
+            synthesis_metadata=metadata,
         )
 
     def _backend_for(self, job: GenerationJob) -> TTSBackend:
@@ -155,6 +170,15 @@ def _backend_cache_key(job: GenerationJob) -> tuple[str, str]:
     return (job.model.backend, json.dumps(job.model.params, sort_keys=True))
 
 
+def _model_config_fingerprint(job: GenerationJob) -> str:
+    payload = json.dumps(
+        {"backend": job.model.backend, "params": job.model.params},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def _cleanup_accelerators() -> None:
     import gc
     import sys
@@ -202,6 +226,32 @@ def _build_manifest(
             "root": str(config.root),
         },
         "device_profile": device_profile,
+        "reproducibility": {
+            "configuration_role": "requested_runtime_configuration",
+            "provenance_note": (
+                "Top-level model/metric specs and package versions describe this invocation. "
+                "Per-sample synthesis_metadata is authoritative for generated or reused audio; "
+                "legacy reused WAVs without a config fingerprint are marked unverified."
+            ),
+            "python_version": platform.python_version(),
+            "model_specs": [
+                {
+                    "id": model.id,
+                    "backend": model.backend,
+                    "params": model.params,
+                }
+                for model in config.models
+            ],
+            "metric_specs": [
+                {
+                    "id": metric.id,
+                    "backend": metric.backend,
+                    "params": metric.params,
+                }
+                for metric in config.metrics
+            ],
+            "package_versions": _runtime_package_versions(),
+        },
         "summary": {
             "models": len(config.models),
             "voices": len(config.voices),
@@ -213,7 +263,12 @@ def _build_manifest(
         "samples": [
             {
                 "job_id": job.id,
-                "model": {"id": job.model.id, "backend": job.model.backend},
+                "model": {
+                    "id": job.model.id,
+                    "backend": job.model.backend,
+                    "params": job.model.params,
+                    "configuration_role": "requested_plan",
+                },
                 "voice": {
                     "id": job.voice.id,
                     "language": job.voice.language,
@@ -236,3 +291,26 @@ def _build_manifest(
             for job in jobs
         ],
     }
+
+
+def _runtime_package_versions() -> dict[str, str]:
+    packages = (
+        "crosslingual-tts-lab",
+        "f5-tts",
+        "qwen-tts",
+        "TTS",
+        "torch",
+        "torchaudio",
+        "transformers",
+        "faster-whisper",
+        "speechbrain",
+        "modelscope",
+        "onnxruntime-gpu",
+    )
+    versions: dict[str, str] = {}
+    for package in packages:
+        try:
+            versions[package] = importlib_metadata.version(package)
+        except importlib_metadata.PackageNotFoundError:
+            continue
+    return versions

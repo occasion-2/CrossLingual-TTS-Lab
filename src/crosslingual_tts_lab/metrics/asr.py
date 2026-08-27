@@ -58,18 +58,22 @@ class _FasterWhisperMetricBase:
                 prepare_ctranslate2_cuda_libraries()
             from faster_whisper import WhisperModel
 
-            self._model = WhisperModel(
-                self._model_size(),
-                device=self._device(),
-                compute_type=self._compute_type(),
-                download_root=self.params.get("download_root"),
-            )
+            load_kwargs = {
+                "device": self._device(),
+                "compute_type": self._compute_type(),
+                "download_root": self.params.get("download_root"),
+            }
+            revision = self._model_revision()
+            if revision is not None:
+                load_kwargs["revision"] = revision
+            self._model = WhisperModel(self._model_size(), **load_kwargs)
         return self._model
 
     def _model_size(self) -> str:
+        if self._uses_cpu_variant():
+            return str(self._forced_model_size or self.params["cpu_model_size"])
         return str(
-            self._forced_model_size
-            or self.params.get("model_size")
+            self.params.get("model_size")
             or self.device_profile.recommended_whisper_model
             or "small"
         )
@@ -78,10 +82,33 @@ class _FasterWhisperMetricBase:
         return str(self._forced_device or self.params.get("device") or self.device_profile.device)
 
     def _compute_type(self) -> str:
+        if self._uses_cpu_variant():
+            return str(
+                self._forced_compute_type
+                or self.params.get("cpu_compute_type")
+                or "int8"
+            )
         return str(
-            self._forced_compute_type
-            or self.params.get("compute_type")
+            self.params.get("compute_type")
             or self.device_profile.recommended_compute_type
+        )
+
+    def _model_revision(self) -> str | None:
+        # CPU execution may select a different checkpoint ("small" by default),
+        # so it needs an independent immutable revision rather than inheriting
+        # the revision for the primary model.
+        key = "cpu_model_revision" if self._uses_cpu_variant() else "model_revision"
+        value = self.params.get(key)
+        if value is None and not self._uses_cpu_variant():
+            value = self.params.get("revision")
+        if value is None:
+            return None
+        revision = str(value).strip()
+        return revision or None
+
+    def _uses_cpu_variant(self) -> bool:
+        return self._forced_model_size is not None or (
+            self._device() == "cpu" and self.params.get("cpu_model_size") is not None
         )
 
     def _should_retry_on_cpu(self, exc: RuntimeError) -> bool:
@@ -128,6 +155,7 @@ class FasterWhisperASRMetric(_FasterWhisperMetricBase):
                     ),
                     "transcript": transcript,
                     "model_size": self._model_size(),
+                    "model_revision": self._model_revision(),
                     "device": self._device(),
                     "compute_type": self._compute_type(),
                     "fallback_reason": self._fallback_reason,
@@ -163,6 +191,7 @@ class FasterWhisperLIDMetric(_FasterWhisperMetricBase):
                     "detected_language_probability": detected_probability,
                     "target_language_probability": target_probability,
                     "model_size": self._model_size(),
+                    "model_revision": self._model_revision(),
                     "device": self._device(),
                     "compute_type": self._compute_type(),
                     "fallback_reason": self._fallback_reason,

@@ -692,22 +692,43 @@ def _real_metric_specs() -> list[dict[str, Any]]:
         {
             "id": "asr_error",
             "backend": "faster_whisper_asr",
-            "params": {"vad_filter": True, "cpu_model_size": "small", "cpu_compute_type": "int8"},
+            "params": {
+                "model_size": "medium",
+                "model_revision": "08e178d48790749d25932bbc082711ddcfdfbc4f",
+                "vad_filter": True,
+                "beam_size": 5,
+                "cpu_model_size": "small",
+                "cpu_model_revision": "536b0662742c02347bc0e980a01041f333bce120",
+                "cpu_compute_type": "int8",
+            },
         },
         {
             "id": "target_language_id",
             "backend": "faster_whisper_lid",
-            "params": {"vad_filter": True, "cpu_model_size": "small", "cpu_compute_type": "int8"},
+            "params": {
+                "model_size": "medium",
+                "model_revision": "08e178d48790749d25932bbc082711ddcfdfbc4f",
+                "vad_filter": True,
+                "cpu_model_size": "small",
+                "cpu_model_revision": "536b0662742c02347bc0e980a01041f333bce120",
+                "cpu_compute_type": "int8",
+            },
         },
         {
             "id": "speaker_similarity",
             "backend": "speechbrain_speaker_similarity",
-            "params": {},
+            "params": {
+                "model_id": "speechbrain/spkrec-ecapa-voxceleb",
+                "model_revision": "0f99f2d0ebe89ac095bcc5903c4dd8f72b367286",
+            },
         },
         {
             "id": "source_language_similarity",
             "backend": "speechbrain_language_similarity",
-            "params": {},
+            "params": {
+                "model_id": "speechbrain/lang-id-voxlingua107-ecapa",
+                "model_revision": "0253049ae131d6a4be1c4f0d8b0ff483a0f8c8e9",
+            },
         },
     ]
 

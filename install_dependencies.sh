@@ -4,6 +4,8 @@ set -e
 # Parse command line arguments
 INSTALL_COSY=false
 INSTALL_SPARK=false
+COSYVOICE_COMMIT="074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc"
+SPARK_TTS_COMMIT="2f1ea9082400547242641f5271b6f941c9f439d1"
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
@@ -37,10 +39,16 @@ if [ "$INSTALL_COSY" = true ] || { [ "$INSTALL_COSY" = false ] && [ "$INSTALL_SP
     if [ ! -d "CosyVoice" ]; then
         echo "Cloning CosyVoice repository..."
         git clone https://github.com/FunASR/CosyVoice.git
+        git -C CosyVoice checkout "$COSYVOICE_COMMIT"
         echo "torch" >> CosyVoice/requirements.txt
         echo "torchaudio" >> CosyVoice/requirements.txt
     else
         echo "CosyVoice repository already present."
+        if [ "$(git -C CosyVoice rev-parse HEAD)" != "$COSYVOICE_COMMIT" ]; then
+            echo "Error: CosyVoice is not at the paper snapshot $COSYVOICE_COMMIT."
+            echo "Checkout that commit in CosyVoice, preserving any local changes first."
+            exit 1
+        fi
     fi
 
     # Always ensure third-party submodules are initialized
@@ -55,10 +63,16 @@ if [ "$INSTALL_SPARK" = true ] || { [ "$INSTALL_COSY" = false ] && [ "$INSTALL_S
     if [ ! -d "Spark-TTS" ]; then
         echo "Cloning Spark-TTS repository..."
         git clone https://github.com/SparkAudio/Spark-TTS.git
+        git -C Spark-TTS checkout "$SPARK_TTS_COMMIT"
         echo "torch" >> Spark-TTS/requirements.txt
         echo "torchaudio" >> Spark-TTS/requirements.txt
     else
         echo "Spark-TTS repository already present."
+        if [ "$(git -C Spark-TTS rev-parse HEAD)" != "$SPARK_TTS_COMMIT" ]; then
+            echo "Error: Spark-TTS is not at the paper snapshot $SPARK_TTS_COMMIT."
+            echo "Checkout that commit in Spark-TTS, preserving any local changes first."
+            exit 1
+        fi
     fi
 
     # Download Spark-TTS pretrained weights
@@ -67,10 +81,10 @@ if [ "$INSTALL_SPARK" = true ] || { [ "$INSTALL_COSY" = false ] && [ "$INSTALL_S
         mkdir -p pretrained_models
         
         if command -v uv &> /dev/null; then
-            uv run --with huggingface_hub huggingface-cli download SparkAudio/Spark-TTS-0.5B --local-dir pretrained_models/Spark-TTS-0.5B
+            uv run --with huggingface_hub huggingface-cli download SparkAudio/Spark-TTS-0.5B --revision 642071559bfc6346c2359d19dcb6be3f9dd8a05d --local-dir pretrained_models/Spark-TTS-0.5B
         else
             pip install huggingface_hub
-            huggingface-cli download SparkAudio/Spark-TTS-0.5B --local-dir pretrained_models/Spark-TTS-0.5B
+            huggingface-cli download SparkAudio/Spark-TTS-0.5B --revision 642071559bfc6346c2359d19dcb6be3f9dd8a05d --local-dir pretrained_models/Spark-TTS-0.5B
         fi
     else
         echo "Spark-TTS model weights already downloaded."

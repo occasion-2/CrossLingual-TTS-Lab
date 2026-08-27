@@ -77,7 +77,10 @@ uv run python xttslab.py dataset fleurs \
   --model-id qwen3_tts_1_7b_base \
   --model-backend qwen_tts \
   --model-param model=Qwen/Qwen3-TTS-12Hz-1.7B-Base \
+  --model-param revision=fd4b254389122332181a7c3db7f27e918eec64e3 \
   --model-param ref_text_mode=empty \
+  --model-param x_vector_only_mode=true \
+  --model-param dtype=bfloat16 \
   --out configs/fleurs_ru_en_zh.toml
 ```
 
@@ -139,6 +142,7 @@ The generated config uses open-source metric adapters:
 - `faster_whisper_asr` for target-language WER/CER
 - `faster_whisper_lid` for generated-audio language identification
 - `speechbrain_speaker_similarity` for reference/generated speaker similarity
+- `speechbrain_language_similarity` for the language-centroid leakage proxy
 
 ## GPU Profile
 
@@ -148,8 +152,10 @@ Check what the runner sees:
 uv run python xttslab.py doctor
 ```
 
-On CUDA-enabled cards (such as 12GB-class GPUs), the default execution uses float16 and a
-`medium` Whisper-family ASR model (falling back to `small` on smaller VRAM cards). The project
+The generated scientific configs pin a float16 `medium` Whisper-family ASR model on CUDA
+and an immutable `small`/int8 checkpoint for initial CPU execution or CUDA fallback.
+Hand-written configs that omit `model_size` still use the device profile's VRAM-based
+recommendation. The project
 pins the Linux GPU stack to `torch>=2.11,<2.12` and `torchaudio>=2.11,<2.12` from the PyTorch
 `cu130` wheel index. If `doctor` reports a CUDA-built Torch but zero visible devices, the
 Python package is correct and the issue is device visibility in the current container/session.
@@ -175,7 +181,7 @@ To run the multi-model FLEURS experiment, use the wrapper script. It keeps each 
    ```bash
    ./install_dependencies.sh
    ```
-    This will clone the `CosyVoice` and `Spark-TTS` repositories locally and download the 2GB Spark-TTS pre-trained weights.
+    This clones the `CosyVoice` and `Spark-TTS` repositories at the paper-snapshot commits and downloads the pinned Spark-TTS 0.5B checkpoint. Existing checkouts are preserved; installation fails with a corrective message when their HEAD differs from the snapshot.
 
 3. **Install Python dependencies for specific backends**:
    Backend dependencies are split into optional extras in [pyproject.toml](pyproject.toml). Install only the stack you need if you are running a single model:
@@ -199,7 +205,7 @@ To run the multi-model FLEURS experiment, use the wrapper script. It keeps each 
    ```bash
    ./run_fleurs_experiment_example.sh
    ```
-   This creates model-specific virtual environments under `overnight_runs/`, generates the FLEURS configs, synthesizes audio, and scores the metrics.
+   This creates model-specific virtual environments under `overnight_runs/`, generates FLEURS configs with the checkpoint revisions and inference settings recorded in [`configs/paper_model_snapshot.toml`](configs/paper_model_snapshot.toml), synthesizes audio, and scores the metrics.
 
 5. **WAV-level resumability**:
    If a run stops, rerun `./run_fleurs_experiment_example.sh`. Completed models are skipped when `report.md` exists, and existing WAV files are reused.
@@ -214,17 +220,19 @@ FLEURS is the main direction-aware benchmark used in the paper tables. Its speak
 
 This builds Common Voice configs with repeated reference utterances per known `client_id`/`speaker_id`, runs the model stack under `overnight_runs_cv/`, and writes `calibration.md` for each model. The calibration command uses known repeated speaker IDs when they are present. The older inferred FLEURS fallback remains for legacy runs.
 
+Calibration pins `speechbrain/spkrec-ecapa-voxceleb@0f99f2d0ebe89ac095bcc5903c4dd8f72b367286` by default and records the checkpoint/device in each report. The `calibrate` command also accepts `--model-id`, `--model-revision`, and `--device` for an explicitly different setup.
+
 Current `overnight_runs_cv/` snapshot: each full model run contains 600 cross-lingual jobs from 30 Common Voice prompts and 30 targets. F5-TTS, Qwen3-TTS 0.6B, Qwen3-TTS 1.7B, XTTS v2, and CosyVoice all completed 600 scored samples. Spark-TTS completed the 400 supported English/Chinese-target samples and records 200 expected placeholders for target-Russian directions.
 
 The calibration bounds now come from repeated Common Voice speaker IDs rather than inferred FLEURS pseudo-pairs:
 
-| Pair type | Speaker Sim |
+| Pair type | Speaker Sim (mean ± population SD) |
 |---|---|
 | same speaker real-real (known speaker ID) | 0.635 ± 0.129 (n=15) |
 | different speaker same language | 0.104 ± 0.104 (n=120) |
 | different speaker cross-language | 0.081 ± 0.090 (n=300) |
 
-The generated-vs-wrong-reference checks from the same run are close to the different-speaker bounds: F5-TTS 0.042 ± 0.075 (n=600), Qwen3-TTS 0.6B 0.059 ± 0.068 (n=600), Qwen3-TTS 1.7B 0.052 ± 0.063 (n=600), XTTS v2 0.064 ± 0.070 (n=600), CosyVoice 0.078 ± 0.082 (n=600), and Spark-TTS 0.058 ± 0.079 (n=400).
+The generated-vs-wrong-reference checks from the same run (reported as mean ± population SD, not confidence intervals) are close to the different-speaker bounds: F5-TTS 0.042 ± 0.075 (n=600), Qwen3-TTS 0.6B 0.059 ± 0.068 (n=600), Qwen3-TTS 1.7B 0.052 ± 0.063 (n=600), XTTS v2 0.064 ± 0.070 (n=600), CosyVoice 0.078 ± 0.082 (n=600), and Spark-TTS 0.058 ± 0.079 (n=400).
 
 Common Voice is no longer usable through the old Hugging Face placeholder repos. The companion script now uses the official Mozilla Data Collective API to fetch the requested locale archives, then extracts only the selected `validated.tsv` rows and clips into `overnight_runs_cv/common_voice/`. Put your Mozilla Data Collective key in `.env` as `COMMONVOICE_APIKEY=...` or set that environment variable before running the script. The parser also accepts spaced `.env` assignments such as `COMMONVOICE_APIKEY = ...`.
 
@@ -331,17 +339,22 @@ the deterministic placeholder metrics, or set real adapters explicitly:
 [[metrics]]
 id = "asr_error"
 backend = "faster_whisper_asr"
-params = { vad_filter = true }
+params = { model_size = "medium", model_revision = "08e178d48790749d25932bbc082711ddcfdfbc4f", vad_filter = true, beam_size = 5, cpu_model_size = "small", cpu_model_revision = "536b0662742c02347bc0e980a01041f333bce120", cpu_compute_type = "int8" }
 
 [[metrics]]
 id = "target_language_id"
 backend = "faster_whisper_lid"
-params = { vad_filter = true }
+params = { model_size = "medium", model_revision = "08e178d48790749d25932bbc082711ddcfdfbc4f", vad_filter = true, cpu_model_size = "small", cpu_model_revision = "536b0662742c02347bc0e980a01041f333bce120", cpu_compute_type = "int8" }
 
 [[metrics]]
 id = "speaker_similarity"
 backend = "speechbrain_speaker_similarity"
-params = {}
+params = { model_id = "speechbrain/spkrec-ecapa-voxceleb", model_revision = "0f99f2d0ebe89ac095bcc5903c4dd8f72b367286" }
+
+[[metrics]]
+id = "source_language_similarity"
+backend = "speechbrain_language_similarity"
+params = { model_id = "speechbrain/lang-id-voxlingua107-ecapa", model_revision = "0253049ae131d6a4be1c4f0d8b0ff483a0f8c8e9" }
 ```
 
 ## What The Report Tracks
@@ -378,9 +391,13 @@ src/crosslingual_tts_lab/
   backends/           # TTS backend interface and implementations
   metrics/            # metric interface and baseline placeholder metrics
 configs/
-  mini.toml           # example benchmark
+  mini.toml                  # example benchmark
+  paper_model_snapshot.toml  # best-available paper-run artifact/configuration provenance
+compute_stats.py             # crossed-bootstrap paper statistics and table generator
+generated_tables.md          # canonical generated paper-result tables
 tests/
   test_config_and_runner.py  # test suite for config, dataset, and runner logic
+  test_compute_stats.py      # statistics and clustered-bootstrap regression tests
 ```
 
 ## Config Shape
@@ -414,18 +431,25 @@ target = "en_weather"
 - **Dataset**: Google FLEURS
 - **Config generation**: `run_fleurs_experiment_example.sh`, producing per-model `overnight_runs/config_*.toml` files
 - **Languages**: English, Russian, Mandarin Chinese
-- **Jobs per full direction**: 100
-- **ASR/LID backend**: faster-whisper (medium/small depending on VRAM)
-- **Speaker similarity**: SpeechBrain ECAPA-TDNN (`speechbrain/spkrec-ecapa-voxceleb`)
-- **Confidence intervals**: 95% bootstrap (1000 resamples, seed 20260628)
-- **Hardware**: CUDA-enabled GPUs (e.g., 12GB+ VRAM class)
+- **Design per full direction**: 10 reference utterances crossed with 10 target texts, producing 100 generations
+- **ASR/LID backend**: `Systran/faster-whisper-medium@08e178d4` (CUDA/float16), with pinned `Systran/faster-whisper-small@536b0662` CPU/int8 fallback
+- **Speaker similarity**: SpeechBrain ECAPA-TDNN (`speechbrain/spkrec-ecapa-voxceleb@0f99f2d0`)
+- **Leakage encoder**: SpeechBrain VoxLingua107 (`speechbrain/lang-id-voxlingua107-ecapa@0253049a`); checked-in centroid SHA-256 `9adca9f8...4373d91`
+- **Confidence intervals**: 95% stratified crossed reference/text bootstrap intervals (1000 resamples, seed 20260628)
+- **Successful sample**: correct target-language identification and ASR error strictly below 10%
+- **Model snapshot**: [`configs/paper_model_snapshot.toml`](configs/paper_model_snapshot.toml)
+- **Hardware snapshot**: Python 3.11, Torch 2.11.0+cu130, NVIDIA GeForce RTX 4080 Laptop GPU; see the model snapshot for backend-specific provenance caveats
 - **Subset construction**: deterministic first rows after language and length filtering
+
+The model snapshot is the best-available provenance record for the paper run's synthesis and evaluator checkpoint IDs, reconstructed immutable hub revisions or surviving local hashes, package or source-repository versions, inference settings, sample rates, and seed status. Every synthesis model and evaluator has explicit `provenance_status`, `provenance_source`, and `provenance_note` fields so reconstructed values are not presented as run-attested facts. The current FLEURS and Common Voice wrappers pin or verify those artifacts for new runs. Several historical systems used stochastic inference without a fixed seed, and the legacy manifests did not preserve a complete environment lock; the historical waveforms are therefore not bit-reproducible and reconstructed revisions are not original-run attestations. XTTS also has mixed device metadata from a resumed run, so the snapshot does not claim one run-attested device for every XTTS sample.
+
+The manifests attest the evaluator aliases and actual per-sample execution modes. Most analyzed ASR/LID rows used faster-whisper `medium` on CUDA/float16, but 358/600 Qwen3-TTS 0.6B LID rows and 200/399 analyzed Spark-TTS ASR rows fell back after CUDA errors to `small` on CPU/int8. The immutable evaluator revisions and package versions in the snapshot were reconstructed afterward. This scoring heterogeneity is a limitation of the historical results; a new comparison should rescore every WAV with one pinned evaluator configuration.
 
 ## Benchmark Results on Google FLEURS
 
 ASR evaluation uses target-language text normalizers before computing WER/CER. The normalizers lowercase where appropriate, remove punctuation, and strip spaces for CJK text.
 
-The tables below come from the FLEURS slice generated by `run_fleurs_experiment_example.sh`. The metrics are:
+The canonical paper tables are generated from the FLEURS manifests under `overnight_runs/`. The metrics are:
 
 - `faster_whisper_asr` for target-text ASR error
 - `faster_whisper_lid` for a conservative target-language score: detected-language confidence if the detected language matches the target, otherwise 0
@@ -436,190 +460,53 @@ The numbers are automatic metrics, not human preference or naturalness judgments
 
 Lower ASR error is better. Higher Target LID score means the output was more confidently detected as the target language. Higher Speaker Sim means higher embedding similarity to the reference. Higher leakage delta means the generated audio is closer to the source-language centroid than to the target-language centroid under this proxy.
 
-### Table 1: Common Target-Language Subset
-*Only `en` and `zh` target conditions. Excludes target-Russian directions to avoid unsupported/degraded model conditions. F5-TTS target-Russian results are reported in Table 4 for transparency but excluded from this table because the base F5 model is not expected to handle Russian target synthesis reliably.*
+### Regenerate the canonical tables
 
-| Model | n | ASR Error ↓ (95% CI) | Target LID score ↑ (95% CI) | Speaker Sim ↑ (95% CI) |
-|---|---|---|---|---|
-| Qwen3-TTS 1.7B | 400 | 7.0% [5.9–8.1] | 96.1% [95.4–96.7] | 0.515 [0.503–0.528] |
-| Qwen3-TTS 0.6B | 397 | 7.8% [6.6–9.0] | 94.5% [93.5–95.3] | 0.516 [0.504–0.529] |
-| XTTS v2 | 400 | 9.6% [8.1–11.3] | 97.0% [95.8–98.0] | 0.468 [0.455–0.479] |
-| Spark-TTS | 400 | 11.9% [10.3–13.5] | 96.0% [94.9–96.9] | 0.420 [0.408–0.432] |
-| CosyVoice | 400 | 17.9% [15.4–20.5] | 74.7% [71.5–78.0] | 0.688 [0.674–0.701] |
-| F5-TTS | 400 | 31.8% [28.1–35.5] | 83.1% [79.9–86.3] | 0.530 [0.508–0.550] |
+Run the statistics script against the FLEURS result root:
 
-### Table 2: Target-Language Aggregates
-*Aggregated by target language across all sources.*
+```bash
+uv run --extra metrics python compute_stats.py \
+  --run-root overnight_runs \
+  --bootstrap-resamples 1000 \
+  --bootstrap-seed 20260628 \
+  --success-asr-threshold 0.10 \
+  --output generated_tables.md
+```
 
-| Model | Target | n | ASR Error ↓ (95% CI) | Target LID score ↑ (95% CI) | Speaker Sim ↑ (95% CI) |
-|---|---|---|---|---|---|
-| Qwen3-TTS 1.7B | en | 200 | 3.9% [3.0–4.9] | 93.8% [92.6–94.9] | 0.556 [0.540–0.571] |
-| Qwen3-TTS 0.6B | en | 199 | 5.1% [3.8–6.2] | 90.8% [89.0–92.3] | 0.571 [0.557–0.584] |
-| XTTS v2 | en | 200 | 3.7% [2.7–4.6] | 97.1% [96.7–97.5] | 0.497 [0.485–0.509] |
-| Spark-TTS | en | 200 | 4.8% [3.6–6.3] | 93.6% [92.2–95.0] | 0.433 [0.420–0.445] |
-| CosyVoice | en | 200 | 12.2% [9.7–14.8] | 72.7% [68.9–76.6] | 0.719 [0.704–0.734] |
-| F5-TTS | en | 200 | 13.1% [10.8–15.7] | 94.6% [93.6–95.5] | 0.610 [0.596–0.622] |
-| Qwen3-TTS 1.7B | ru | 200 | 1.5% [1.0–2.1] | 97.0% [96.4–97.5] | 0.479 [0.459–0.499] |
-| Qwen3-TTS 0.6B | ru | 194 | 4.1% [3.1–5.3] | 98.3% [97.9–98.6] | 0.449 [0.428–0.473] |
-| XTTS v2 | ru | 200 | 7.5% [6.0–9.4] | 97.5% [96.0–98.7] | 0.456 [0.435–0.479] |
-| Spark-TTS | ru | 0 | - | - | - |
-| CosyVoice | ru | 200 | 53.3% [47.1–59.9] | 31.4% [25.9–37.1] | 0.731 [0.713–0.748] |
-| F5-TTS | ru | 200 | 131.9% [122.3–142.3] | 0.0% [0.0–0.0] | 0.526 [0.482–0.567] |
-| Qwen3-TTS 1.7B | zh | 200 | 10.1% [8.2–11.9] | 98.5% [98.2–98.7] | 0.474 [0.456–0.491] |
-| Qwen3-TTS 0.6B | zh | 198 | 10.6% [8.9–12.7] | 98.2% [97.8–98.6] | 0.460 [0.441–0.479] |
-| XTTS v2 | zh | 200 | 15.5% [12.7–18.5] | 96.8% [94.4–98.7] | 0.439 [0.421–0.456] |
-| Spark-TTS | zh | 200 | 19.1% [16.7–21.4] | 98.3% [96.8–99.4] | 0.408 [0.387–0.427] |
-| CosyVoice | zh | 200 | 23.5% [19.7–27.4] | 76.8% [71.8–81.9] | 0.657 [0.634–0.678] |
-| F5-TTS | zh | 200 | 50.5% [45.0–55.8] | 71.6% [65.8–77.6] | 0.451 [0.412–0.486] |
+[`generated_tables.md`](generated_tables.md) is the canonical generated result artifact. It contains the common supported-target subset, target/source aggregates, per-direction metrics, direction-level leakage, successful-only leakage, and Pearson/Spearman leakage correlations with LID and ASR. The README intentionally does not duplicate its confidence-interval tables, so regenerated results cannot silently drift away from a second static copy.
 
-**Interpretation:** Target Chinese is harder for most systems than target English. Qwen3-TTS has the most even profile in this run. XTTS does better on target English than target Chinese. F5-TTS performs poorly on target Russian, so the common-subset table separates English/Chinese targets from full-coverage results.
+The common subset is defined from documented target-language support before looking at model quality. Metrics use their own complete cases: a missing speaker-similarity value does not remove an otherwise valid ASR, LID, or leakage observation.
 
-### Table 3: Source-Language Aggregates (Speaker Similarity)
-*Aggregated by source language to show how well each model retains speaker identity across origin languages.*
+### Crossed reference/text bootstrap
 
-| Model | Source | n | Speaker Sim ↑ (95% CI) |
-|---|---|---|---|
-| Qwen3-TTS 1.7B | en | 200 | 0.379 [0.365–0.394] |
-| Qwen3-TTS 0.6B | en | 194 | 0.348 [0.334–0.364] |
-| XTTS v2 | en | 200 | 0.352 [0.333–0.370] |
-| Spark-TTS | en | 100 | 0.319 [0.296–0.342] |
-| CosyVoice | en | 200 | 0.626 [0.604–0.647] |
-| F5-TTS | en | 200 | 0.316 [0.275–0.359] |
-| Qwen3-TTS 1.7B | ru | 200 | 0.550 [0.534–0.564] |
-| Qwen3-TTS 0.6B | ru | 200 | 0.549 [0.534–0.564] |
-| XTTS v2 | ru | 200 | 0.478 [0.466–0.489] |
-| Spark-TTS | ru | 200 | 0.459 [0.445–0.474] |
-| CosyVoice | ru | 200 | 0.722 [0.706–0.737] |
-| F5-TTS | ru | 200 | 0.581 [0.566–0.595] |
-| Qwen3-TTS 1.7B | zh | 200 | 0.580 [0.567–0.593] |
-| Qwen3-TTS 0.6B | zh | 197 | 0.582 [0.571–0.593] |
-| XTTS v2 | zh | 200 | 0.562 [0.552–0.572] |
-| Spark-TTS | zh | 100 | 0.443 [0.426–0.461] |
-| CosyVoice | zh | 200 | 0.759 [0.744–0.773] |
-| F5-TTS | zh | 200 | 0.689 [0.679–0.699] |
+The 100 samples in a full direction are not independent: each reference utterance is reused across ten texts, and each text is reused across ten references. `compute_stats.py` therefore uses a language-stratified crossed (pigeonhole) bootstrap rather than an iid row bootstrap. Within each replicate it independently resamples reference IDs inside source-language strata and target-text IDs inside target-language strata; an observation receives the product of its two cluster multiplicities. The same procedure supplies the intervals for means and correlations.
 
-**Interpretation:** ECAPA speaker similarity depends on the reference language. In this run, English references produce lower similarity for several models than Chinese or Russian references. The Common Voice calibration table below gives real-real same-speaker and different-speaker bounds for reading these scores.
+### Leakage on strictly successful samples
 
-### Table 4: Per-Direction Breakdowns
-*Provides full visibility into specific language pairs, exposing asymmetric performance.*
+A sample is successful only when faster-whisper detects the intended target language and its target-language ASR error is strictly below 0.10. The threshold applies to WER for English/Russian and CER for Mandarin. Leakage analysis then requires a valid leakage value as a metric-specific complete case.
 
-| Model | Direction | n | ASR Error ↓ (95% CI) | Target LID score ↑ (95% CI) | Speaker Sim ↑ (95% CI) |
-|---|---|---|---|---|---|
-| Qwen3-TTS 1.7B | en->ru | 100 | 1.4% [0.8–2.2] | 95.5% [94.6–96.4] | 0.365 [0.343–0.386] |
-| Qwen3-TTS 1.7B | en->zh | 100 | 6.6% [4.4–9.1] | 97.6% [97.1–98.0] | 0.394 [0.373–0.413] |
-| Qwen3-TTS 1.7B | ru->en | 100 | 4.4% [3.1–5.7] | 92.8% [90.7–94.5] | 0.545 [0.523–0.567] |
-| Qwen3-TTS 1.7B | ru->zh | 100 | 13.6% [10.5–16.5] | 99.4% [99.3–99.4] | 0.555 [0.536–0.574] |
-| Qwen3-TTS 1.7B | zh->en | 100 | 3.4% [2.3–4.8] | 94.7% [93.2–95.9] | 0.567 [0.545–0.587] |
-| Qwen3-TTS 1.7B | zh->ru | 100 | 1.6% [0.9–2.3] | 98.5% [98.2–98.8] | 0.592 [0.578–0.606] |
-| Qwen3-TTS 0.6B | en->ru | 96 | 5.8% [3.9–7.8] | 97.2% [96.6–97.8] | 0.327 [0.305–0.350] |
-| Qwen3-TTS 0.6B | en->zh | 98 | 7.5% [5.1–9.9] | 97.1% [96.3–97.7] | 0.369 [0.348–0.390] |
-| Qwen3-TTS 0.6B | ru->en | 100 | 5.1% [3.5–7.1] | 93.0% [91.3–94.6] | 0.548 [0.524–0.570] |
-| Qwen3-TTS 0.6B | ru->zh | 100 | 13.7% [11.0–16.4] | 99.3% [99.2–99.4] | 0.550 [0.532–0.568] |
-| Qwen3-TTS 0.6B | zh->en | 99 | 5.0% [3.3–6.9] | 88.5% [85.4–90.9] | 0.595 [0.579–0.611] |
-| Qwen3-TTS 0.6B | zh->ru | 98 | 2.5% [1.5–3.5] | 99.2% [99.1–99.4] | 0.569 [0.554–0.584] |
-| XTTS v2 | en->ru | 100 | 8.9% [5.8–12.2] | 96.2% [93.1–98.5] | 0.336 [0.313–0.361] |
-| XTTS v2 | en->zh | 100 | 17.9% [13.1–23.0] | 94.1% [89.3–98.0] | 0.368 [0.341–0.392] |
-| XTTS v2 | ru->en | 100 | 3.5% [2.4–4.8] | 97.0% [96.5–97.4] | 0.447 [0.434–0.460] |
-| XTTS v2 | ru->zh | 100 | 13.1% [10.3–15.7] | 99.5% [99.4–99.5] | 0.509 [0.492–0.527] |
-| XTTS v2 | zh->en | 100 | 3.8% [2.3–5.4] | 97.2% [96.5–97.8] | 0.547 [0.533–0.562] |
-| XTTS v2 | zh->ru | 100 | 6.2% [4.9–7.6] | 98.9% [98.8–99.1] | 0.577 [0.565–0.588] |
-| Spark-TTS | en->ru | 0 | - | - | - |
-| Spark-TTS | en->zh | 100 | 25.5% [21.8–29.0] | 97.3% [94.3–99.4] | 0.319 [0.296–0.342] |
-| Spark-TTS | ru->en | 100 | 5.4% [3.6–7.9] | 93.2% [91.2–94.7] | 0.422 [0.402–0.441] |
-| Spark-TTS | ru->zh | 100 | 12.7% [10.1–15.3] | 99.4% [99.3–99.5] | 0.497 [0.478–0.516] |
-| Spark-TTS | zh->en | 100 | 4.3% [3.0–6.0] | 94.1% [91.6–96.0] | 0.443 [0.426–0.462] |
-| Spark-TTS | zh->ru | 0 | - | - | - |
-| CosyVoice | en->ru | 100 | 39.0% [33.0–45.1] | 41.3% [33.1–48.8] | 0.675 [0.645–0.701] |
-| CosyVoice | en->zh | 100 | 14.3% [9.8–19.5] | 92.5% [87.6–96.1] | 0.577 [0.547–0.604] |
-| CosyVoice | ru->en | 100 | 11.1% [8.2–14.6] | 62.9% [56.0–69.3] | 0.708 [0.686–0.730] |
-| CosyVoice | ru->zh | 100 | 32.7% [27.1–38.8] | 61.2% [52.5–69.8] | 0.737 [0.714–0.757] |
-| CosyVoice | zh->en | 100 | 13.2% [9.6–17.5] | 82.5% [79.0–85.5] | 0.731 [0.708–0.749] |
-| CosyVoice | zh->ru | 100 | 67.7% [57.3–78.7] | 21.5% [14.3–29.8] | 0.787 [0.767–0.803] |
-| F5-TTS | en->ru | 100 | 117.5% [107.8–128.7] | 0.0% [0.0–0.0] | 0.331 [0.270–0.393] |
-| F5-TTS | en->zh | 100 | 55.4% [46.8–64.6] | 49.3% [39.4–58.2] | 0.301 [0.246–0.357] |
-| F5-TTS | ru->en | 100 | 22.5% [18.5–26.7] | 93.8% [92.5–94.8] | 0.562 [0.543–0.581] |
-| F5-TTS | ru->zh | 100 | 45.6% [39.8–52.5] | 93.9% [90.1–97.0] | 0.600 [0.583–0.617] |
-| F5-TTS | zh->en | 100 | 3.7% [2.3–5.2] | 95.5% [94.0–96.8] | 0.658 [0.643–0.673] |
-| F5-TTS | zh->ru | 100 | 146.3% [131.4–162.4] | 0.0% [0.0–0.0] | 0.721 [0.710–0.730] |
+Current point estimates from the canonical artifact are summarized below; use [`generated_tables.md`](generated_tables.md) for the clustered confidence intervals and direction-level breakdowns.
 
-**Interpretation:** Direction matters. F5-TTS is good on `zh->en` in this run but poor on target-Russian directions. CosyVoice has high speaker-similarity scores but weaker ASR/LID scores in several directions.
+| Model | Successful / eligible | Successful leakage delta ↓ | Spearman ρ(Δ, LID) | Spearman ρ(Δ, ASR) |
+|---|---:|---:|---:|---:|
+| F5-TTS | 144 / 600 | -0.058 | -0.800 | 0.775 |
+| CosyVoice | 226 / 600 | -0.013 | -0.648 | 0.485 |
+| Qwen3-TTS 0.6B | 456 / 600 | -0.085 | -0.469 | 0.044 |
+| Qwen3-TTS 1.7B | 482 / 600 | -0.094 | -0.265 | 0.083 |
+| Spark-TTS | 234 / 399 | -0.069 | -0.021 | 0.082 |
+| XTTS v2 | 420 / 600 | -0.081 | -0.206 | 0.044 |
 
-### Table 5: Pareto Ranking
-Better intelligibility does not always come with higher speaker similarity. In this run:
+The correlations show substantial overlap between the leakage proxy and ASR/LID for failure-prone systems, especially F5-TTS and CosyVoice. The proxy is therefore not claimed to be statistically independent of those metrics. Its model- and direction-level variation remains after conditioning on correct LID and low ASR error, showing that the binary success screen alone does not make the proxy constant. The mixed fallback above makes the Qwen3-TTS 0.6B success and LID-correlation results, and the Spark-TTS success and ASR-correlation results, provisional pending homogeneous rescoring.
 
-- **Lowest ASR error**: Qwen3-TTS 1.7B
-- **Highest target LID score**: XTTS v2
-- **Highest speaker similarity**: CosyVoice
-- **Small model to compare against**: Qwen3-TTS 0.6B
+### Leakage metric caveat
 
-### Table 6: Normalized Source-Language Leakage (Delta)
-*Difference between generated audio's cosine similarity to the source-language centroid and the target-language centroid. Higher delta (> 0) means the output is closer to the source-language centroid under this proxy.*
-
-| Model | Direction | n | Leakage Delta ↓ (95% CI) |
-|---|---|---|---|
-| F5-TTS | en->ru | 100 | 0.070 [0.062–0.079] |
-| F5-TTS | en->zh | 100 | -0.023 [-0.032, -0.015] |
-| F5-TTS | ru->en | 100 | -0.061 [-0.070, -0.052] |
-| F5-TTS | ru->zh | 100 | -0.054 [-0.060, -0.047] |
-| F5-TTS | zh->en | 100 | -0.051 [-0.057, -0.045] |
-| F5-TTS | zh->ru | 100 | 0.109 [0.105–0.113] |
-| CosyVoice | en->ru | 100 | 0.045 [0.035–0.056] |
-| CosyVoice | en->zh | 100 | -0.034 [-0.039, -0.028] |
-| CosyVoice | ru->en | 100 | 0.001 [-0.008–0.009] |
-| CosyVoice | ru->zh | 100 | 0.018 [0.011–0.024] |
-| CosyVoice | zh->en | 100 | -0.008 [-0.013, -0.003] |
-| CosyVoice | zh->ru | 100 | 0.053 [0.045–0.061] |
-| Qwen3-TTS 0.6B | en->ru | 96 | -0.127 [-0.132, -0.121] |
-| Qwen3-TTS 0.6B | en->zh | 98 | -0.075 [-0.079, -0.071] |
-| Qwen3-TTS 0.6B | ru->en | 100 | -0.076 [-0.084, -0.070] |
-| Qwen3-TTS 0.6B | ru->zh | 100 | -0.086 [-0.091, -0.081] |
-| Qwen3-TTS 0.6B | zh->en | 99 | -0.032 [-0.037, -0.027] |
-| Qwen3-TTS 0.6B | zh->ru | 98 | -0.109 [-0.114, -0.104] |
-| Qwen3-TTS 1.7B | en->ru | 100 | -0.130 [-0.137, -0.124] |
-| Qwen3-TTS 1.7B | en->zh | 100 | -0.071 [-0.075, -0.067] |
-| Qwen3-TTS 1.7B | ru->en | 100 | -0.094 [-0.103, -0.086] |
-| Qwen3-TTS 1.7B | ru->zh | 100 | -0.088 [-0.093, -0.083] |
-| Qwen3-TTS 1.7B | zh->en | 100 | -0.053 [-0.058, -0.048] |
-| Qwen3-TTS 1.7B | zh->ru | 100 | -0.116 [-0.121, -0.111] |
-| Spark-TTS | en->zh | 100 | -0.050 [-0.054, -0.045] |
-| Spark-TTS | ru->en | 100 | -0.107 [-0.114, -0.101] |
-| Spark-TTS | ru->zh | 100 | -0.078 [-0.082, -0.073] |
-| Spark-TTS | zh->en | 100 | -0.035 [-0.039, -0.030] |
-| XTTS v2 | en->ru | 100 | -0.107 [-0.116, -0.100] |
-| XTTS v2 | en->zh | 100 | -0.063 [-0.067, -0.059] |
-| XTTS v2 | ru->en | 100 | -0.099 [-0.105, -0.092] |
-| XTTS v2 | ru->zh | 100 | -0.085 [-0.089, -0.080] |
-| XTTS v2 | zh->en | 100 | -0.032 [-0.038, -0.025] |
-| XTTS v2 | zh->ru | 100 | -0.085 [-0.092, -0.078] |
-
-**Interpretation:** CosyVoice combines high speaker-similarity scores with positive or near-zero leakage deltas in several directions. That pattern may mean the speaker embedding score is partly capturing source-language acoustic cues. Qwen3-TTS has consistently negative leakage deltas in this run while also keeping ASR error low.
-
-### Leakage Metric Caveat
-The leakage score is an embedding-based proxy using VoxLingua107 space normalized against FLEURS language centroids. It still needs human accent/prosody validation.
-
-### Table 7: Speaker-Similarity Calibration
-*Speaker similarity needs calibration because embedding scores can move with channel, language, and speaker identity. These bounds come from `overnight_runs_cv/`, using repeated Common Voice `client_id`/`speaker_id` values rather than inferred FLEURS pseudo-pairs:*
-
-| Pair type | Speaker Sim |
-|---|---|
-| same speaker real-real (known speaker ID) | 0.635 ± 0.129 (n=15) |
-| different speaker same language | 0.104 ± 0.104 (n=120) |
-| different speaker cross-language | 0.081 ± 0.090 (n=300) |
-| generated vs wrong reference, F5-TTS | 0.042 ± 0.075 (n=600) |
-| generated vs wrong reference, Qwen3-TTS 0.6B | 0.059 ± 0.068 (n=600) |
-| generated vs wrong reference, Qwen3-TTS 1.7B | 0.052 ± 0.063 (n=600) |
-| generated vs wrong reference, XTTS v2 | 0.064 ± 0.070 (n=600) |
-| generated vs wrong reference, CosyVoice | 0.078 ± 0.082 (n=600) |
-| generated vs wrong reference, Spark-TTS | 0.058 ± 0.079 (n=400) |
-
-Note: same-speaker cross-language calibration is still `N/A` in this Common Voice slice because the available repeated speaker IDs are within locale, not across languages.
-
-**Interpretation:** The calibration table gives a same-speaker real-real bound from known Common Voice IDs: repeated same-speaker utterances average about 0.64, while different-speaker pairs are near 0.10 or below. The `generated vs wrong reference` checks are also near the negative bounds. CosyVoice’s high FLEURS speaker similarity should be read against those bounds, but it is still an automatic metric rather than proof of perceived identity preservation.
+Leakage delta is a VoxLingua107 language-embedding centroid margin, not a calibrated perceptual accent, phonetics, or prosody score. Human validation is still required for those claims.
 
 ## Current Status
 
 Implemented model backends:
 
+- **Qwen3-TTS** (`QwenTTSBackend` / `qwen_tts`)
 - **F5-TTS** (`F5TTSBackend` / `f5_tts`)
 - **XTTS/Coqui** (`CoquiXTTSBackend` / `coqui_xtts` / `xtts`)
 - **CosyVoice** (`CosyVoiceBackend` / `cosyvoice`)
