@@ -27,11 +27,28 @@ def run_benchmark(config: BenchmarkConfig, out_dir: Path) -> Path:
 
 
 def score_existing_run(config: BenchmarkConfig, out_dir: Path) -> Path:
-    audio_dir = out_dir / "audio"
+    return score_existing_run_to(config, out_dir, out_dir)
+
+
+def score_existing_run_to(
+    config: BenchmarkConfig,
+    source_run_dir: Path,
+    out_dir: Path,
+) -> Path:
+    """Score source-run WAVs into a separate result directory.
+
+    The source audio and synthesis metadata are read-only inputs. The new
+    manifest/report are written under ``out_dir`` and retain audio paths into
+    ``source_run_dir``. ``score_existing_run`` remains the backwards-compatible
+    in-place wrapper.
+    """
+
+    audio_dir = source_run_dir / "audio"
     if not audio_dir.exists():
         raise FileNotFoundError(f"missing run audio directory: {audio_dir}")
 
-    existing_metadata = _load_existing_synthesis_metadata(out_dir / "manifest.json")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    existing_metadata = _load_existing_synthesis_metadata(source_run_dir / "manifest.json")
     return _execute_benchmark(
         config,
         out_dir,
@@ -303,6 +320,7 @@ def _runtime_package_versions() -> dict[str, str]:
         "torchaudio",
         "transformers",
         "faster-whisper",
+        "ctranslate2",
         "speechbrain",
         "modelscope",
         "onnxruntime-gpu",

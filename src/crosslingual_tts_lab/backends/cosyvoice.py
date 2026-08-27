@@ -19,6 +19,7 @@ class CosyVoiceBackend:
     name: str = "cosyvoice"
     _model: Any = field(default=None, init=False, repr=False)
     _model_source: str | None = field(default=None, init=False, repr=False)
+    _resolved_model_class: str | None = field(default=None, init=False, repr=False)
     _artifact_tree_verified: bool | None = field(default=None, init=False, repr=False)
     _source_revision_verified: bool | None = field(default=None, init=False, repr=False)
 
@@ -34,7 +35,7 @@ class CosyVoiceBackend:
 
         prompt_speech = str(job.voice.audio_path)
         prompt_text = self._reference_text(job)
-        if "CosyVoice3" in self._model_name() and "<|endofprompt|>" not in prompt_text:
+        if self._is_cosyvoice3() and "<|endofprompt|>" not in prompt_text:
             prompt_text = "You are a helpful assistant.<|endofprompt|>" + prompt_text
 
         chunks = []
@@ -80,6 +81,7 @@ class CosyVoiceBackend:
                 "source_revision": self.params.get("source_revision"),
                 "source_revision_verified": self._source_revision_verified,
                 "resolved_model_source": self._model_source or self._model_name(),
+                "resolved_model_class": self._resolved_model_class or type(model).__name__,
                 "artifact_tree_verified": self._artifact_tree_verified,
                 "inference_config": {
                     "prompt_mode": "zero_shot_with_transcript",
@@ -119,6 +121,14 @@ class CosyVoiceBackend:
             model_name = self._model_name()
             model_source = self._resolve_model_source()
             self._model = AutoModel(**self._model_load_kwargs(model_name, model_source))
+            self._resolved_model_class = type(self._model).__name__
+            expected_class = self._expected_model_class(model_name, model_source)
+            if expected_class and self._resolved_model_class != expected_class:
+                raise RuntimeError(
+                    "CosyVoice runtime class mismatch: "
+                    f"checkpoint requires {expected_class}, but AutoModel returned "
+                    f"{self._resolved_model_class}"
+                )
         return self._model
 
     def _model_load_kwargs(self, model_name: str, model_source: str) -> dict[str, Any]:
@@ -129,14 +139,47 @@ class CosyVoiceBackend:
         }
         # CosyVoice's constructors are version-specific: CosyVoice3 omits
         # load_jit, while only CosyVoice2/3 accept load_vllm.
-        if "CosyVoice3" in model_name:
+        model_class = self._expected_model_class(model_name, model_source)
+        if model_class == "CosyVoice3":
             load_kwargs["load_vllm"] = bool(self.params.get("load_vllm", False))
-        elif "CosyVoice2" in model_name:
+        elif model_class == "CosyVoice2":
             load_kwargs["load_jit"] = bool(self.params.get("load_jit", False))
             load_kwargs["load_vllm"] = bool(self.params.get("load_vllm", False))
         else:
             load_kwargs["load_jit"] = bool(self.params.get("load_jit", False))
         return load_kwargs
+
+    @staticmethod
+    def _expected_model_class(model_name: str, model_source: str) -> str | None:
+        """Resolve the runtime family from the checkpoint, then its public ID.
+
+        Checking the checkpoint files makes local CosyVoice3 directories safe
+        even when their directory name does not contain ``CosyVoice3``.
+        """
+
+        source = Path(model_source)
+        if source.is_dir():
+            if (source / "cosyvoice3.yaml").is_file():
+                return "CosyVoice3"
+            if (source / "cosyvoice2.yaml").is_file():
+                return "CosyVoice2"
+            if (source / "cosyvoice.yaml").is_file():
+                return "CosyVoice"
+        if "CosyVoice3" in model_name:
+            return "CosyVoice3"
+        if "CosyVoice2" in model_name:
+            return "CosyVoice2"
+        if "CosyVoice" in model_name:
+            return "CosyVoice"
+        return None
+
+    def _is_cosyvoice3(self) -> bool:
+        if self._resolved_model_class is not None:
+            return self._resolved_model_class == "CosyVoice3"
+        return self._expected_model_class(
+            self._model_name(),
+            self._model_source or self._model_name(),
+        ) == "CosyVoice3"
 
     def _verify_source_revision(self, checkout: Path) -> None:
         expected = self.params.get("source_revision")

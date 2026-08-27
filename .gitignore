@@ -18,6 +18,7 @@ runs/
 .codex
 overnight_runs/
 overnight_runs_cv/
+paper_evaluator_rescore/
 CosyVoice/
 Spark-TTS/
 .uv-cache/

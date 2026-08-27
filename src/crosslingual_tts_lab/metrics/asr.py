@@ -131,10 +131,11 @@ class _FasterWhisperMetricBase:
 class FasterWhisperASRMetric(_FasterWhisperMetricBase):
     def evaluate(self, sample: GeneratedSample) -> MetricResult:
         try:
+            beam_size = int(self.params.get("beam_size", 5))
             segments, info = self._transcribe_audio(
                 sample,
                 language=sample.job.target.language,
-                beam_size=int(self.params.get("beam_size", 5)),
+                beam_size=beam_size,
             )
             transcript = " ".join(segment.text.strip() for segment in segments).strip()
             error_name, error_value = choose_error_rate(
@@ -158,6 +159,7 @@ class FasterWhisperASRMetric(_FasterWhisperMetricBase):
                     "model_revision": self._model_revision(),
                     "device": self._device(),
                     "compute_type": self._compute_type(),
+                    "beam_size": beam_size,
                     "fallback_reason": self._fallback_reason,
                 },
             )
@@ -171,7 +173,12 @@ class FasterWhisperASRMetric(_FasterWhisperMetricBase):
 class FasterWhisperLIDMetric(_FasterWhisperMetricBase):
     def evaluate(self, sample: GeneratedSample) -> MetricResult:
         try:
-            segments, info = self._transcribe_audio(sample, language=None, beam_size=1)
+            beam_size = int(self.params.get("beam_size", 1))
+            segments, info = self._transcribe_audio(
+                sample,
+                language=None,
+                beam_size=beam_size,
+            )
             for _ in segments:
                 break
             detected = getattr(info, "language", None)
@@ -194,6 +201,7 @@ class FasterWhisperLIDMetric(_FasterWhisperMetricBase):
                     "model_revision": self._model_revision(),
                     "device": self._device(),
                     "compute_type": self._compute_type(),
+                    "beam_size": beam_size,
                     "fallback_reason": self._fallback_reason,
                 },
             )

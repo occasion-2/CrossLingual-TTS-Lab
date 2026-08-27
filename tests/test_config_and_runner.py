@@ -815,6 +815,25 @@ class ConfigAndRunnerTests(unittest.TestCase):
         self.assertNotIn("load_jit", kwargs)
         self.assertIn("load_vllm", kwargs)
 
+    def test_cosyvoice3_family_is_detected_from_local_checkpoint(self) -> None:
+        from crosslingual_tts_lab.backends.cosyvoice import CosyVoiceBackend
+
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint = Path(tmp) / "local-checkpoint"
+            checkpoint.mkdir()
+            (checkpoint / "cosyvoice3.yaml").write_text("sample_rate: 24000\n")
+
+            backend = CosyVoiceBackend({"load_jit": True, "load_vllm": False})
+            kwargs = backend._model_load_kwargs("local-checkpoint", str(checkpoint))
+
+            self.assertEqual(
+                backend._expected_model_class("local-checkpoint", str(checkpoint)),
+                "CosyVoice3",
+            )
+
+        self.assertNotIn("load_jit", kwargs)
+        self.assertIn("load_vllm", kwargs)
+
     def test_xtts_artifact_hash_verification(self) -> None:
         import hashlib
         from types import SimpleNamespace

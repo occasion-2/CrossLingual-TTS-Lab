@@ -445,6 +445,22 @@ The model snapshot is the best-available provenance record for the paper run's s
 
 The manifests attest the evaluator aliases and actual per-sample execution modes. Most analyzed ASR/LID rows used faster-whisper `medium` on CUDA/float16, but 358/600 Qwen3-TTS 0.6B LID rows and 200/399 analyzed Spark-TTS ASR rows fell back after CUDA errors to `small` on CPU/int8. The immutable evaluator revisions and package versions in the snapshot were reconstructed afterward. This scoring heterogeneity is a limitation of the historical results; a new comparison should rescore every WAV with one pinned evaluator configuration.
 
+### Evaluator-only paper rescore
+
+First validate the complete paper subset and both generated/reference WAV inventories without loading evaluator models:
+
+```bash
+uv run --extra metrics python rescore_paper_evaluators.py \
+  --source-root overnight_runs \
+  --output-root paper_evaluator_rescore \
+  --dry-run \
+  --skip-runtime-checks
+```
+
+Then omit the two dry-run flags to score on CUDA. The profile requires faster-whisper `medium` at the pinned revision with CUDA/float16 (ASR beam 5, LID beam 1), disables CPU fallback, and pins both SpeechBrain evaluator revisions. It writes new manifests and reports under `paper_evaluator_rescore/`; historical `overnight_runs/results_*/manifest.json` files and WAVs remain read-only inputs. Existing destination manifests are refused unless `--overwrite` is explicitly supplied. The completed manifests record the evaluator profile, exact package versions, source-manifest hashes, and separate generated/reference WAV inventory hashes.
+
+If scoring is interrupted, rerun with `--resume`. The script first downloads the three exact evaluator revisions sequentially, then reuses only rows whose complete metric status and evaluator details exactly match the pinned profile. Invalid or missing rows are rescored into a temporary manifest, merged in planned order, fully validated, and atomically installed. A fully validated completed model is skipped. `--resume` and `--overwrite` are mutually exclusive.
+
 ## Benchmark Results on Google FLEURS
 
 ASR evaluation uses target-language text normalizers before computing WER/CER. The normalizers lowercase where appropriate, remove punctuation, and strip spaces for CJK text.

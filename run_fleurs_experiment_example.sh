@@ -4,8 +4,9 @@ set -e
 # Run overnight benchmark for 6 models: F5-TTS, Qwen3-TTS 0.6B, Qwen3-TTS 1.7B, XTTS, CosyVoice, Spark-TTS
 # Requirements: at least 10 voices per language, at least 10 targets per voice per target language.
 # This gives ~10 * 3 languages = 30 voices.
-# Target languages: en, zh, ru (so 3 * 10 = 30 targets per voice).
-# Total jobs per model: 30 voices * 30 targets = 900 jobs.
+# Target languages: en, zh, ru. The config builder excludes each voice's
+# same-language targets, leaving 20 cross-lingual targets per voice.
+# Total jobs per model: 30 voices * 20 targets = 600 jobs.
 
 export COQUI_TOS_AGREED=1
 export UV_CACHE_DIR="$PWD/.uv-cache"
