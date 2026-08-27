@@ -1,28 +1,40 @@
+# Python environments and caches
 .venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
-runs/
+
+# Packaging and build output
 dist/
 build/
 *.egg-info/
+
+# Local dependency resolution and secrets
 uv.lock
+.uv-cache/
+.env
+
+# Local agent state
+.agents
+.codex
+
+# Generated experiment configurations and runs
 configs/*
 !configs/mini.toml
 !configs/models_real.template.toml
 !configs/paper_model_snapshot.toml
 runs/
-.env
-.agents
-.codex
 overnight_runs/
 overnight_runs_cv/
 paper_evaluator_rescore/
+
+# External model repositories and checkpoints
 CosyVoice/
 Spark-TTS/
-.uv-cache/
 pretrained_models/
+
+# LaTeX build output
 paper/*.aux
 paper/*.bbl
 paper/*.blg

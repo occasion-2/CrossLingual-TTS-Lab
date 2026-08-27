@@ -106,10 +106,14 @@ Mozilla Data Collective in October 2025. Use FLEURS for the direct HF path, or
 download Common Voice manually from Mozilla Data Collective and build a local
 config.
 
-For F5-TTS, avoid Russian target text for now: the base F5 model is much more
-usable for English/Mandarin targets, while Russian references can still be used
-as voice prompts. The FLEURS generator also removes spaces between Mandarin
-characters before writing the config.
+The exact `F5TTS_v1_Base` artifact is documented by its
+[official model card](https://github.com/SWivid/F5-TTS/blob/main/src/f5_tts/infer/SHARED.md)
+as an English/Mandarin checkpoint. Treat target-Russian generations as
+out-of-support stress tests, not as supported-language performance. Russian
+references are still accepted by the artifact's cloning interface, but that
+does not establish documented cross-lingual prompt support. The FLEURS
+generator also removes spaces between Mandarin characters before writing the
+config.
 
 The equivalent F5 command uses the F5 backend and F5 model parameter:
 
@@ -152,10 +156,11 @@ Check what the runner sees:
 uv run python xttslab.py doctor
 ```
 
-The generated scientific configs pin a float16 `medium` Whisper-family ASR model on CUDA
-and an immutable `small`/int8 checkpoint for initial CPU execution or CUDA fallback.
-Hand-written configs that omit `model_size` still use the device profile's VRAM-based
-recommendation. The project
+The generated synthesis-run configs pin a float16 `medium` Whisper-family ASR model on CUDA
+and an immutable `small`/int8 checkpoint for initial CPU execution or CUDA fallback. The
+canonical paper rescore is stricter: every row uses the pinned `medium` revision on
+CUDA/float16, with CPU fallback disabled. Hand-written configs that omit `model_size` still
+use the device profile's VRAM-based recommendation. The project
 pins the Linux GPU stack to `torch>=2.11,<2.12` and `torchaudio>=2.11,<2.12` from the PyTorch
 `cu130` wheel index. If `doctor` reports a CUDA-built Torch but zero visible devices, the
 Python package is correct and the issue is device visibility in the current container/session.
@@ -222,7 +227,7 @@ This builds Common Voice configs with repeated reference utterances per known `c
 
 Calibration pins `speechbrain/spkrec-ecapa-voxceleb@0f99f2d0ebe89ac095bcc5903c4dd8f72b367286` by default and records the checkpoint/device in each report. The `calibrate` command also accepts `--model-id`, `--model-revision`, and `--device` for an explicitly different setup.
 
-Current `overnight_runs_cv/` snapshot: each full model run contains 600 cross-lingual jobs from 30 Common Voice prompts and 30 targets. F5-TTS, Qwen3-TTS 0.6B, Qwen3-TTS 1.7B, XTTS v2, and CosyVoice all completed 600 scored samples. Spark-TTS completed the 400 supported English/Chinese-target samples and records 200 expected placeholders for target-Russian directions.
+The reported calibration run used 600 cross-lingual jobs per full-coverage model from 30 Common Voice prompts and 30 targets. F5-TTS, Qwen3-TTS 0.6B, Qwen3-TTS 1.7B, XTTS v2, and CosyVoice completed 600 scored samples; Spark-TTS completed 400 English/Chinese-target samples and recorded 200 expected target-Russian placeholders. The original `overnight_runs_cv/` manifests and reports are local, ignored run artifacts and are not present in this checkout, so the summary below cannot currently be re-audited from a clean clone. A future release should archive a compact selected-row manifest and calibration report.
 
 The calibration bounds now come from repeated Common Voice speaker IDs rather than inferred FLEURS pseudo-pairs:
 
@@ -333,28 +338,29 @@ appropriate: `coqui_xtts`, `xtts`, `xtts_v2`; `f5_tts`, `f5`, `f5tts`;
 `cli`.
 
 Metric backends are configured in `[[metrics]]` blocks. Omit the section to use
-the deterministic placeholder metrics, or set real adapters explicitly:
+the deterministic placeholder metrics, or set real adapters explicitly. This is the exact
+no-fallback evaluator profile used for the canonical paper rescore:
 
 ```toml
 [[metrics]]
 id = "asr_error"
 backend = "faster_whisper_asr"
-params = { model_size = "medium", model_revision = "08e178d48790749d25932bbc082711ddcfdfbc4f", vad_filter = true, beam_size = 5, cpu_model_size = "small", cpu_model_revision = "536b0662742c02347bc0e980a01041f333bce120", cpu_compute_type = "int8" }
+params = { model_size = "medium", model_revision = "08e178d48790749d25932bbc082711ddcfdfbc4f", device = "cuda", compute_type = "float16", vad_filter = true, beam_size = 5, allow_cpu_fallback = false }
 
 [[metrics]]
 id = "target_language_id"
 backend = "faster_whisper_lid"
-params = { model_size = "medium", model_revision = "08e178d48790749d25932bbc082711ddcfdfbc4f", vad_filter = true, cpu_model_size = "small", cpu_model_revision = "536b0662742c02347bc0e980a01041f333bce120", cpu_compute_type = "int8" }
+params = { model_size = "medium", model_revision = "08e178d48790749d25932bbc082711ddcfdfbc4f", device = "cuda", compute_type = "float16", vad_filter = true, beam_size = 1, allow_cpu_fallback = false }
 
 [[metrics]]
 id = "speaker_similarity"
 backend = "speechbrain_speaker_similarity"
-params = { model_id = "speechbrain/spkrec-ecapa-voxceleb", model_revision = "0f99f2d0ebe89ac095bcc5903c4dd8f72b367286" }
+params = { model_id = "speechbrain/spkrec-ecapa-voxceleb", model_revision = "0f99f2d0ebe89ac095bcc5903c4dd8f72b367286", device = "cuda:0" }
 
 [[metrics]]
 id = "source_language_similarity"
 backend = "speechbrain_language_similarity"
-params = { model_id = "speechbrain/lang-id-voxlingua107-ecapa", model_revision = "0253049ae131d6a4be1c4f0d8b0ff483a0f8c8e9" }
+params = { model_id = "speechbrain/lang-id-voxlingua107-ecapa", model_revision = "0253049ae131d6a4be1c4f0d8b0ff483a0f8c8e9", device = "cuda:0" }
 ```
 
 ## What The Report Tracks
@@ -394,10 +400,14 @@ configs/
   mini.toml                  # example benchmark
   paper_model_snapshot.toml  # best-available paper-run artifact/configuration provenance
 compute_stats.py             # crossed-bootstrap paper statistics and table generator
-generated_tables.md          # canonical generated paper-result tables
+rescore_paper_evaluators.py  # pinned, isolated, resumable evaluator-only paper rescore
+artifacts/
+  generated_tables_rescored.md # canonical homogeneous-rescore paper tables
+  generated_tables.md          # historical heterogeneous-evaluator tables
 tests/
   test_config_and_runner.py  # test suite for config, dataset, and runner logic
   test_compute_stats.py      # statistics and clustered-bootstrap regression tests
+  test_paper_rescore.py      # evaluator-rescore validation and resume tests
 ```
 
 ## Config Shape
@@ -431,19 +441,21 @@ target = "en_weather"
 - **Dataset**: Google FLEURS
 - **Config generation**: `run_fleurs_experiment_example.sh`, producing per-model `overnight_runs/config_*.toml` files
 - **Languages**: English, Russian, Mandarin Chinese
+- **FLEURS slice**: `google/fleurs`, `validation` split; deterministic first rows after filtering reference transcripts to at most 120 characters and target texts to at most 110 characters; the historical Hugging Face dataset revision was not recorded
 - **Design per full direction**: 10 reference utterances crossed with 10 target texts, producing 100 generations
-- **ASR/LID backend**: `Systran/faster-whisper-medium@08e178d4` (CUDA/float16), with pinned `Systran/faster-whisper-small@536b0662` CPU/int8 fallback
-- **Speaker similarity**: SpeechBrain ECAPA-TDNN (`speechbrain/spkrec-ecapa-voxceleb@0f99f2d0`)
-- **Leakage encoder**: SpeechBrain VoxLingua107 (`speechbrain/lang-id-voxlingua107-ecapa@0253049a`); checked-in centroid SHA-256 `9adca9f8...4373d91`
+- **Canonical evaluator profile**: `paper-evaluators-medium-cuda-fp16-v1`, written under `paper_evaluator_rescore/`
+- **ASR/LID backend**: `Systran/faster-whisper-medium@08e178d48790749d25932bbc082711ddcfdfbc4f`, CUDA/float16, VAD enabled, ASR beam 5, LID beam 1, CPU fallback disabled
+- **Speaker similarity**: SpeechBrain ECAPA-TDNN (`speechbrain/spkrec-ecapa-voxceleb@0f99f2d0ebe89ac095bcc5903c4dd8f72b367286`), CUDA:0
+- **Leakage encoder**: SpeechBrain VoxLingua107 (`speechbrain/lang-id-voxlingua107-ecapa@0253049ae131d6a4be1c4f0d8b0ff483a0f8c8e9`), CUDA:0; checked-in centroid SHA-256 `9adca9f8...4373d91`
+- **Evaluator packages**: faster-whisper 1.2.1, CTranslate2 4.8.0, SpeechBrain 1.1.0, Torch/Torchaudio 2.11.0+cu130
 - **Confidence intervals**: 95% stratified crossed reference/text bootstrap intervals (1000 resamples, seed 20260628)
-- **Successful sample**: correct target-language identification and ASR error strictly below 10%
+- **Automatic ASR/LID screen**: correct target-language identification and ASR error strictly below 10%; generation-cap sensitivity is reported separately
 - **Model snapshot**: [`configs/paper_model_snapshot.toml`](configs/paper_model_snapshot.toml)
 - **Hardware snapshot**: Python 3.11, Torch 2.11.0+cu130, NVIDIA GeForce RTX 4080 Laptop GPU; see the model snapshot for backend-specific provenance caveats
-- **Subset construction**: deterministic first rows after language and length filtering
 
-The model snapshot is the best-available provenance record for the paper run's synthesis and evaluator checkpoint IDs, reconstructed immutable hub revisions or surviving local hashes, package or source-repository versions, inference settings, sample rates, and seed status. Every synthesis model and evaluator has explicit `provenance_status`, `provenance_source`, and `provenance_note` fields so reconstructed values are not presented as run-attested facts. The current FLEURS and Common Voice wrappers pin or verify those artifacts for new runs. Several historical systems used stochastic inference without a fixed seed, and the legacy manifests did not preserve a complete environment lock; the historical waveforms are therefore not bit-reproducible and reconstructed revisions are not original-run attestations. XTTS also has mixed device metadata from a resumed run, so the snapshot does not claim one run-attested device for every XTTS sample.
+The model snapshot is the best-available provenance record for the paper run's synthesis checkpoint IDs, reconstructed immutable hub revisions or surviving local hashes, package or source-repository versions, inference settings, sample rates, and seed status. Every synthesis model has explicit `provenance_status`, `provenance_source`, and `provenance_note` fields so reconstructed values are not presented as run-attested facts. F5-TTS's empty reference text invokes upstream `openai/whisper-large-v3-turbo` auto-transcription with unforced language, 30-second chunks, and batch size 128; its historical immutable auxiliary-ASR revision was not recorded. Several historical systems used stochastic inference without a fixed seed, and the legacy manifests did not preserve a complete environment lock; the historical waveforms are therefore not bit-reproducible and reconstructed synthesis revisions are not original-run attestations. XTTS also has mixed device metadata from a resumed synthesis run. In contrast, the evaluator-only rescore manifests attest the exact evaluator revisions, settings, packages, source-manifest hashes, and generated/reference WAV inventory hashes used by the canonical tables. The tracked snapshot preserves compact input/output hashes because the full rescore manifests remain ignored run artifacts.
 
-The manifests attest the evaluator aliases and actual per-sample execution modes. Most analyzed ASR/LID rows used faster-whisper `medium` on CUDA/float16, but 358/600 Qwen3-TTS 0.6B LID rows and 200/399 analyzed Spark-TTS ASR rows fell back after CUDA errors to `small` on CPU/int8. The immutable evaluator revisions and package versions in the snapshot were reconstructed afterward. This scoring heterogeneity is a limitation of the historical results; a new comparison should rescore every WAV with one pinned evaluator configuration.
+Historical pre-rescore provenance: the original manifests used faster-whisper `medium` on CUDA/float16 for most ASR/LID rows, but 358/600 Qwen3-TTS 0.6B LID rows and 200/399 analyzed Spark-TTS ASR rows fell back to `small` on CPU/int8 after CUDA errors. Those heterogeneous results remain in [`artifacts/generated_tables.md`](artifacts/generated_tables.md) for comparison, but they are superseded by the homogeneous rescore and are not used in the paper's primary claims.
 
 ### Evaluator-only paper rescore
 
@@ -457,17 +469,26 @@ First validate the complete paper subset and both generated/reference WAV invent
   --skip-runtime-checks
 ```
 
-Then omit the two dry-run flags and add `--resume` to score on CUDA. The profile requires faster-whisper `medium` at the pinned revision with CUDA/float16 (ASR beam 5, LID beam 1), disables CPU fallback, and pins both SpeechBrain evaluator revisions. It writes new manifests and reports under `paper_evaluator_rescore/`; historical `overnight_runs/results_*/manifest.json` files and WAVs remain read-only inputs. Existing destination manifests are refused unless `--overwrite` is explicitly supplied. The completed manifests record the evaluator profile, exact package versions, source-manifest hashes, and separate generated/reference WAV inventory hashes.
+Then omit the two dry-run flags and add `--resume` to score on CUDA. The profile requires faster-whisper `medium` at the pinned revision with CUDA/float16 (ASR beam 5, LID beam 1), disables CPU fallback, and pins both SpeechBrain evaluator revisions. It writes new manifests and reports under `paper_evaluator_rescore/`; historical `overnight_runs/results_*/manifest.json` files and WAVs remain read-only inputs. Existing destination manifests require either `--resume` or explicit `--overwrite`. The completed manifests record the evaluator profile, exact package versions, source-manifest hashes, and separate generated/reference WAV inventory hashes.
 
-Each of the four metrics runs in its own spawned process, so the two faster-whisper models and two SpeechBrain models never remain resident on the GPU together. A completed pass is strictly validated and attested under `paper_evaluator_rescore/results_*/.metric-passes/` before the next process starts; process exit provides a hard CUDA-memory teardown. The four pass results are merged by job ID in canonical metric order, fully validated, and atomically installed as the model manifest. Audio is never truncated and evaluator errors do not trigger CPU fallback.
+```bash
+.venv/bin/python -u rescore_paper_evaluators.py \
+  --source-root overnight_runs \
+  --output-root paper_evaluator_rescore \
+  --resume
+```
 
-If scoring is interrupted, rerun the same command with `--resume`. The script reuses completed model manifests and exact, validated per-metric pass manifests; an invalid or failed pass is rerun without discarding earlier valid passes. `--resume` and `--overwrite` are mutually exclusive. Do not use plain `uv run` for this command because it may attempt to resolve unrelated synthesis extras such as FlashAttention; if the existing environment must be launched through uv, use `uv run --no-sync rescore_paper_evaluators.py ...`.
+The current rescore driver runs each of the four metrics in its own spawned process, so the two faster-whisper models and two SpeechBrain models never remain resident on the GPU together. A completed pass is strictly validated under `paper_evaluator_rescore/results_*/.metric-passes/` before the next process starts; process exit provides a hard CUDA-memory teardown. The four pass results are merged by job ID in canonical metric order, fully validated, and atomically installed as the model manifest. Four completed model manifests attest this per-metric execution path. F5-TTS and CosyVoice3 were completed with the same pinned evaluator specifications before process isolation was added and therefore do not carry per-pass isolation artifacts. Audio is never truncated and evaluator errors do not trigger CPU fallback.
+
+If scoring is interrupted, rerun the same command with `--resume`. The script reuses completed model manifests and exact, validated per-metric pass manifests; an invalid or failed pass is rerun without discarding earlier valid passes. `--resume` and `--overwrite` are mutually exclusive. Do not use plain `uv run` for this command because it may attempt to resolve unrelated synthesis extras such as FlashAttention; if the existing environment must be launched through uv, use `uv run --no-sync python -u rescore_paper_evaluators.py ...`.
+
+The completed rescore contains six validated manifests, 3,399 analyzed generations, and 13,596/13,596 status-`ok` evaluator calls. Every result uses the same pinned evaluator profile without CPU fallback or evaluator-side audio truncation. One Spark-TTS English/Chinese-target attempt is an existing synthetic placeholder and is excluded before rescoring, which is why its analyzed total is 399 rather than 400.
 
 ## Benchmark Results on Google FLEURS
 
 ASR evaluation uses target-language text normalizers before computing WER/CER. The normalizers lowercase where appropriate, remove punctuation, and strip spaces for CJK text.
 
-The canonical paper tables are generated from the FLEURS manifests under `overnight_runs/`. The metrics are:
+The canonical paper tables are generated from the homogeneous FLEURS evaluator manifests under `paper_evaluator_rescore/`. The historical `overnight_runs/` tree supplies the read-only synthesis WAVs and metadata. The metrics are:
 
 - `faster_whisper_asr` for target-text ASR error
 - `faster_whisper_lid` for a conservative target-language score: detected-language confidence if the detected language matches the target, otherwise 0
@@ -480,45 +501,51 @@ Lower ASR error is better. Higher Target LID score means the output was more con
 
 ### Regenerate the canonical tables
 
-Run the statistics script against the FLEURS result root:
+Run the statistics script against the homogeneous FLEURS rescore root:
 
 ```bash
-uv run --extra metrics python compute_stats.py \
-  --run-root overnight_runs \
+.venv/bin/python compute_stats.py \
+  --run-root paper_evaluator_rescore \
   --bootstrap-resamples 1000 \
   --bootstrap-seed 20260628 \
   --success-asr-threshold 0.10 \
-  --output generated_tables.md
+  --output artifacts/generated_tables_rescored.md
 ```
 
-[`generated_tables.md`](generated_tables.md) is the canonical generated result artifact. It contains the common supported-target subset, target/source aggregates, per-direction metrics, direction-level leakage, successful-only leakage, and Pearson/Spearman leakage correlations with LID and ASR. The README intentionally does not duplicate its confidence-interval tables, so regenerated results cannot silently drift away from a second static copy.
+[`artifacts/generated_tables_rescored.md`](artifacts/generated_tables_rescored.md) is the canonical generated result artifact. It contains the common English/Mandarin target-language subset, target/source aggregates, per-direction metrics, direction-level leakage, leakage after the automatic ASR/LID screen, and Pearson/Spearman leakage correlations with LID and ASR. [`artifacts/generated_tables.md`](artifacts/generated_tables.md) preserves the superseded heterogeneous-evaluator results for audit. The README intentionally does not duplicate the canonical confidence-interval tables, so regenerated results cannot silently drift away from a second static copy.
 
-The common subset is defined from documented target-language support before looking at model quality. Metrics use their own complete cases: a missing speaker-similarity value does not remove an otherwise valid ASR, LID, or leakage observation.
+The common subset is defined from documented target-language support rather than observed model quality. It is an artifact-plus-interface comparison and does not assert documented support for every source-prompt language or cross-lingual direction. In particular, the exact F5 checkpoint is an English/Mandarin artifact, so target Russian is only an out-of-support stress test. Metrics use their own complete cases: a missing speaker-similarity value does not remove an otherwise valid ASR, LID, or leakage observation.
 
 ### Crossed reference/text bootstrap
 
-The 100 samples in a full direction are not independent: each reference utterance is reused across ten texts, and each text is reused across ten references. `compute_stats.py` therefore uses a language-stratified crossed (pigeonhole) bootstrap rather than an iid row bootstrap. Within each replicate it independently resamples reference IDs inside source-language strata and target-text IDs inside target-language strata; an observation receives the product of its two cluster multiplicities. The same procedure supplies the intervals for means and correlations.
+The 100 samples in a full direction are not independent: each reference utterance is reused across ten texts, and each text is reused across ten references. `compute_stats.py` therefore uses a language-stratified crossed (pigeonhole) bootstrap rather than an iid row bootstrap. Within each replicate it independently resamples reference IDs inside source-language strata and target-text IDs inside target-language strata; an observation receives the product of its two cluster multiplicities. The same procedure supplies the intervals for means and correlations. These intervals are conditional on the three selected languages, deterministic first-row slice, and one realized waveform per cell; they do not include dataset-selection or synthesis-randomness uncertainty and are not paired model-difference tests.
 
-### Leakage on strictly successful samples
+### Leakage after the automatic ASR/LID screen
 
-A sample is successful only when faster-whisper detects the intended target language and its target-language ASR error is strictly below 0.10. The threshold applies to WER for English/Russian and CER for Mandarin. Leakage analysis then requires a valid leakage value as a metric-specific complete case.
+For this analysis, a sample passes the automatic ASR/LID screen only when faster-whisper detects the intended target language and its target-language ASR error is strictly below 0.10. The threshold applies to WER for English/Russian and CER for Mandarin. Leakage analysis then requires a valid leakage value as a metric-specific complete case. This screen measures ASR/LID behavior, not valid decoder termination; the cap-hit sensitivity below makes that distinction explicit.
 
-Current point estimates from the canonical artifact are summarized below; use [`generated_tables.md`](generated_tables.md) for the clustered confidence intervals and direction-level breakdowns.
+Current point estimates from the canonical artifact are summarized below; use [`artifacts/generated_tables_rescored.md`](artifacts/generated_tables_rescored.md) for the clustered confidence intervals and direction-level breakdowns.
 
-| Model | Successful / eligible | Successful leakage delta ↓ | Spearman ρ(Δ, LID) | Spearman ρ(Δ, ASR) |
+| Model | ASR/LID pass / eligible | Screened leakage delta ↓ | Spearman ρ(Δ, LID) | Spearman ρ(Δ, ASR) |
 |---|---:|---:|---:|---:|
-| F5-TTS | 144 / 600 | -0.058 | -0.800 | 0.775 |
+| F5-TTS | 144 / 600 | -0.058 | -0.800 | 0.780 |
 | CosyVoice | 226 / 600 | -0.013 | -0.648 | 0.485 |
-| Qwen3-TTS 0.6B | 456 / 600 | -0.085 | -0.469 | 0.044 |
-| Qwen3-TTS 1.7B | 482 / 600 | -0.094 | -0.265 | 0.083 |
-| Spark-TTS | 234 / 399 | -0.069 | -0.021 | 0.082 |
-| XTTS v2 | 420 / 600 | -0.081 | -0.206 | 0.044 |
+| Qwen3-TTS 0.6B | 457 / 600 | -0.085 | -0.465 | 0.044 |
+| Qwen3-TTS 1.7B | 482 / 600 | -0.094 | -0.265 | 0.085 |
+| Spark-TTS | 274 / 399 | -0.067 | -0.021 | -0.015 |
+| XTTS v2 | 420 / 600 | -0.081 | -0.206 | 0.043 |
 
-The correlations show substantial overlap between the leakage proxy and ASR/LID for failure-prone systems, especially F5-TTS and CosyVoice. The proxy is therefore not claimed to be statistically independent of those metrics. Its model- and direction-level variation remains after conditioning on correct LID and low ASR error, showing that the binary success screen alone does not make the proxy constant. The mixed fallback above makes the Qwen3-TTS 0.6B success and LID-correlation results, and the Spark-TTS success and ASR-correlation results, provisional pending homogeneous rescoring.
+The pooled correlations show substantial overlap between the leakage proxy and ASR/LID for failure-prone configurations, especially F5-TTS and CosyVoice. F5's association is partly driven by its out-of-support target-Russian stress rows. Qwen3-TTS retains a moderate LID association but little ASR association, while both Spark-TTS correlations are centered near zero. Because the correlations pool directions and the LID score is zero for wrong-language detections by construction, they do not establish independence or incremental validity. The screen only shows that the proxy is not identical to the binary ASR/LID rule. Aggregate screened means are also composition-confounded because configurations pass different directions at different rates; the direction-level table is the appropriate comparison. Qwen3-TTS 1.7B, for example, has a more negative screened direction mean than CosyVoice3 in all six shared directions.
+
+The homogeneous rescore preserves the central ranking-free interpretation while materially changing Spark-TTS's measured ASR results. On the common English/Mandarin target subset, Qwen3-TTS 1.7B has the lowest ASR-error point estimate at 7.0%, followed by Qwen3-TTS 0.6B at 8.0%, Spark-TTS at 8.6%, and XTTS v2 at 9.6%; their confidence intervals overlap. XTTS v2 has the highest target-LID point estimate at 97.0%. CosyVoice3 has the highest speaker-similarity point estimate at 0.688 but weaker ASR/LID results. A clear decoupling example is CosyVoice3 `zh→ru`: speaker similarity is 0.787 alongside 68.6% ASR error and 21.5% target LID. The F5 `zh→ru` stress test is more extreme (0.721 speaker similarity, 156.4% ASR error, and 0% target LID), but target Russian is outside that exact checkpoint's documented English/Mandarin scope. Relative to the historical evaluator mix, Spark-TTS common-subset ASR changes from 11.7% to 8.6%, `en→zh` from 25.5% to 13.2%, and automatic ASR/LID passes from 234 to 274.
+
+### Generation-cap sensitivity
+
+A post-hoc duration audit found nine Qwen3-TTS 0.6B outputs at exactly 655.28 seconds and two Spark-TTS English/Chinese-target outputs at exactly 59.98 seconds, consistent with their configured decoding limits. These materialized attempts remain in unconditional waveform tables so generation failures are not hidden. Qwen3-TTS 0.6B has 591/600 non-cap outputs. Spark-TTS has 397/400 non-cap English/Chinese-target attempts, plus one excluded synthetic placeholder; the primary waveform tables are conditional on the remaining 399 materialized, non-placeholder WAVs. Both Spark cap outputs fail the automatic screen. One Qwen cap output passes because the VAD-enabled evaluator obtains zero normalized WER and correct LID despite the runaway waveform. Excluding all cap-hit attempts gives 456/591 ASR/LID passes for Qwen3-TTS 0.6B and 274/397 for Spark-TTS. Qwen's screened leakage mean changes from -0.084956 to -0.085154. For the common target subset, Qwen's ASR point estimate changes from 8.04% to 7.84%; Spark's changes from 8.56% to 8.10%. The qualitative interpretation is unchanged, but an automatic ASR/LID pass is not proof of valid generation termination.
 
 ### Leakage metric caveat
 
-Leakage delta is a VoxLingua107 language-embedding centroid margin, not a calibrated perceptual accent, phonetics, or prosody score. Human validation is still required for those claims.
+Leakage delta is a VoxLingua107 language-embedding centroid margin, not a calibrated perceptual accent, phonetics, or prosody score. Human validation is still required for those claims. The checked-in centroid vectors and their hash reproduce the reported metric values, but the original centroid-construction log was not retained: the exact FLEURS rows, preprocessing and averaging procedure, and any overlap with benchmark rows are unknown. The artifact is therefore executable but not independently reconstructible from raw data.
 
 ## Current Status
 

@@ -575,8 +575,32 @@ class ConfigAndRunnerTests(unittest.TestCase):
         self.assertEqual(len(snapshot["models"]), 6)
         self.assertEqual(len(snapshot["evaluators"]), 3)
         self.assertTrue(
-            all(item["provenance_status"] == "reconstructed" for item in snapshot["evaluators"])
+            all(item["provenance_status"] == "reconstructed" for item in snapshot["models"])
         )
+        self.assertTrue(
+            all(
+                item["provenance_status"] == "run-attested-rescore"
+                for item in snapshot["evaluators"]
+            )
+        )
+        self.assertEqual(
+            snapshot["evaluator_rescore"]["profile_id"],
+            "paper-evaluators-medium-cuda-fp16-v1",
+        )
+        self.assertIs(snapshot["evaluator_rescore"]["cpu_fallback"], False)
+        self.assertEqual(
+            set(snapshot["evaluator_rescore"]["runs"]),
+            {"f5tts", "cosyvoice", "qwen0_6b", "qwen1_7b", "spark_tts", "xtts"},
+        )
+        self.assertTrue(
+            all(
+                len(run["result_manifest_sha256"]) == 64
+                for run in snapshot["evaluator_rescore"]["runs"].values()
+            )
+        )
+        f5 = next(item for item in snapshot["models"] if item["id"] == "f5tts_v1_base")
+        self.assertEqual(f5["documented_target_languages"], ["en", "zh"])
+        self.assertEqual(f5["reference_asr_checkpoint"], "openai/whisper-large-v3-turbo")
         leakage = next(
             item
             for item in snapshot["evaluators"]

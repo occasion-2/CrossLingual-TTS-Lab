@@ -116,7 +116,6 @@ conflicts = [
   [ { extra = "cosyvoice" }, { extra = "spark-tts" } ],
 ]
 
-
 [tool.uv.sources]
 torch = [
   { index = "pytorch-cu130", marker = "sys_platform == 'linux'" },
@@ -159,12 +158,6 @@ norecursedirs = [
   "pretrained_models",
 ]
 
-
-
-
-
-
-
 [[tool.uv.dependency-metadata]]
 name = "tensorrt-cu12"
 requires-dist = ["tensorrt-cu12-bindings", "tensorrt-cu12-libs"]
@@ -187,5 +180,4 @@ requires-dist = [
   "more-itertools",
   "tiktoken",
 ]
-
 

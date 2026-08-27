@@ -14,6 +14,95 @@ cuda_runtime_reported_by_torch = "13.0"
 gpu = "NVIDIA GeForce RTX 4080 Laptop GPU"
 python = "3.11"
 
+[benchmark_data]
+dataset = "google/fleurs"
+dataset_revision = "not recorded by the historical config generator"
+split = "validation"
+languages = ["en_us", "ru_ru", "cmn_hans_cn"]
+voices_per_language = 10
+targets_per_language = 10
+max_voice_chars = 120
+max_target_chars = 110
+min_target_chars = "unset"
+selection = "deterministic first rows after filtering"
+
+[speaker_calibration]
+dataset = "Mozilla Common Voice Scripted Speech 26.0"
+split = "validated"
+locales = ["en", "ru", "zh-CN"]
+speakers_per_locale = 5
+utterances_per_speaker = 2
+targets_per_locale = 10
+min_target_chars = 4
+max_voice_chars = 120
+max_target_chars = 110
+english_accent_filter = ["United States English", "England English", "Canadian English", "Australian English", "New Zealand English", "Scottish English", "Irish English", "Welsh English"]
+artifact_status = "summary values are retained in README/paper, but the ignored overnight_runs_cv manifests and selected-row files are absent from this checkout"
+
+[evaluator_rescore]
+date = "2026-08-27"
+profile_id = "paper-evaluators-medium-cuda-fp16-v1"
+source_root = "overnight_runs"
+result_root = "paper_evaluator_rescore"
+source_access = "read-only manifests, generated WAVs, and reference WAVs"
+metric_execution = "spawned CUDA process per metric for Qwen3-TTS 0.6B/1.7B, Spark-TTS, and XTTS; F5-TTS and CosyVoice3 predate pass isolation and do not attest that execution mode"
+cpu_fallback = false
+audio_truncation = false
+faster_whisper = "1.2.1"
+ctranslate2 = "4.8.0"
+speechbrain = "1.1.0"
+torch = "2.11.0+cu130"
+torchaudio = "2.11.0+cu130"
+provenance_note = "The homogeneous evaluator-only manifests attest exact metric specs, package versions, source-manifest hashes, and generated/reference WAV inventory hashes. Historical synthesis provenance below remains reconstructed where noted."
+
+[evaluator_rescore.runs.f5tts]
+rows = 600
+result_manifest_sha256 = "85e0ed1dc2a4a8d54b1d5eb321781be9c83595e66a40d722d45f54a6fa3b9092"
+source_manifest_sha256 = "7719850376d06910e502a29ae391b3d04fa155e65b34515c89c07fa810609024"
+generated_wav_inventory_sha256 = "a9a9a38ae570a165b3ddeb668aac93cc21c0960a793089c00b1be99014b85c17"
+reference_wav_inventory_sha256 = "33bc8726c388b3503d23ce684cf8d608ca1442b134d8f50c2d0c1390cfd4892a"
+metric_execution = "same pinned profile; per-metric process isolation not attested"
+
+[evaluator_rescore.runs.cosyvoice]
+rows = 600
+result_manifest_sha256 = "ed82745a007a2679e29fa97d8e355f7a101d84bffd072f45fb4a337f422594a6"
+source_manifest_sha256 = "5a701dc51ce551ff0f30d627181f60de0d5187e14d305cff0d770bebbfc167ca"
+generated_wav_inventory_sha256 = "1a46992f5e7f47e61da256755ec6caf6c46eb9a5e2a94896e1d841ed302ab711"
+reference_wav_inventory_sha256 = "19d2af61d6b71f29e311667bc7ba095a727b5793ebc5b424a65c0c54ede2cbf7"
+metric_execution = "same pinned profile; per-metric process isolation not attested"
+
+[evaluator_rescore.runs.qwen0_6b]
+rows = 600
+result_manifest_sha256 = "a44c1dede989ed8f841e2429f539f61dbe4a09bedd67172f4de709ddba7ac0b7"
+source_manifest_sha256 = "d903e7ab87360fd0d449ccaee36f35502e9ffbcb54334de42cc0e4f3bfe63cf8"
+generated_wav_inventory_sha256 = "ee9758d4f226a83226bd4c582ad2603caae381fec04719ad1e3ba41baea59fc6"
+reference_wav_inventory_sha256 = "b633875014fa60944a11ce98a95f0d1c14e08a8342b501bf2a8157dd2fa82912"
+metric_execution = "spawned_process_per_metric"
+
+[evaluator_rescore.runs.qwen1_7b]
+rows = 600
+result_manifest_sha256 = "5ed803d72fb27ad31c50acb8af193d680960a3b29ee156d1fb65779b73d1c9e6"
+source_manifest_sha256 = "63a7b1b160cb8cb7dcf1549bb9df9a0315e09d90d3fb1fe76c923d117397bca5"
+generated_wav_inventory_sha256 = "4461e23409c803b2328e6da73b003608f0ec7da5ff092279b70f0e2b21b99047"
+reference_wav_inventory_sha256 = "8f4ba51369756e6f719c6f33853a1ed09221de632c79acb41e96563798f87db4"
+metric_execution = "spawned_process_per_metric"
+
+[evaluator_rescore.runs.spark_tts]
+rows = 399
+result_manifest_sha256 = "ca161cc59ef508259d7051c2fe7bee7eee1bb419c058bdc620c22b725fc44f36"
+source_manifest_sha256 = "de5dd6cfcd64235eac42c852c25bff2a321672829a6d481aafdc88c417ecba19"
+generated_wav_inventory_sha256 = "4b04cfda84aaba6354e440af4ec8193e9ab8d8f8ed86c2dd65510cd7ecc978d9"
+reference_wav_inventory_sha256 = "c367092a590d884ee8940cc01e43e816c073ba836d56e274a61500e17c6c6849"
+metric_execution = "spawned_process_per_metric"
+
+[evaluator_rescore.runs.xtts]
+rows = 600
+result_manifest_sha256 = "ee92c902dcb64c2806e5d0125335898ab92afd6d4b45901f2b9aa548bb6aaf7e"
+source_manifest_sha256 = "4c46d5089602b3320b30955b3e43b8657553612286d760f2995312e0672b219d"
+generated_wav_inventory_sha256 = "ab3b894a9a69c15340425072ee1867b9a492e754d3d62faa0bf6a544816f8cf7"
+reference_wav_inventory_sha256 = "49c0c04e08bf12003a02006808324b1e7b4237d1f93789f3262ea6b039e8910e"
+metric_execution = "spawned_process_per_metric"
+
 [[models]]
 id = "qwen3_tts_0_6b_base"
 paper_name = "Qwen3-TTS 0.6B"
@@ -56,6 +145,10 @@ provenance_status = "reconstructed"
 provenance_source = "legacy manifest model alias plus immutable official hub snapshot"
 provenance_note = "The F5TTS_v1_Base alias, empty reference text, and CUDA are run-attested; immutable revision and hash were reconstructed after the run."
 params = { ref_text_mode = "empty", ode_method = "euler", use_ema = true, nfe_step = 32, cfg_strength = 2.0, sway_sampling_coef = -1.0, speed = 1.0, remove_silence = false }
+documented_target_languages = ["en", "zh"]
+reference_asr_checkpoint = "openai/whisper-large-v3-turbo"
+reference_asr_revision = "not recorded by the historical synthesis manifest"
+reference_asr_settings = { language = "unforced", chunk_length_s = 30, batch_size = 128 }
 vocoder = "charactr/vocos-mel-24khz"
 vocoder_revision = "0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21"
 vocoder_weight_sha256 = "97ec976ad1fd67a33ab2682d29c0ac7df85234fae875aefcc5fb215681a91b2a"
@@ -118,12 +211,10 @@ package = "faster-whisper==1.2.1"
 checkpoint = "Systran/faster-whisper-medium"
 revision = "08e178d48790749d25932bbc082711ddcfdfbc4f"
 params = { device = "cuda", compute_type = "float16", asr_beam_size = 5, lid_beam_size = 1, vad_filter = true }
-cpu_fallback_checkpoint = "Systran/faster-whisper-small"
-cpu_fallback_revision = "536b0662742c02347bc0e980a01041f333bce120"
-cpu_fallback_compute_type = "int8"
-provenance_status = "reconstructed"
-provenance_source = "legacy result details plus immutable official hub snapshots"
-provenance_note = "The medium alias, CUDA/float16 execution, beam settings, and VAD use are run-attested; immutable hub revisions were added after the legacy run."
+cpu_fallback = false
+provenance_status = "run-attested-rescore"
+provenance_source = "paper_evaluator_rescore manifests and evaluator_profile.json"
+provenance_note = "The primary paper tables use the exact medium revision on CUDA/float16 for every row. ASR uses beam 5, LID uses beam 1, VAD is enabled, and CPU fallback is disabled. The pre-rescore historical manifests with small/int8 fallbacks are retained only for provenance."
 
 [[evaluators]]
 id = "speaker_similarity"
@@ -134,9 +225,10 @@ revision = "0f99f2d0ebe89ac095bcc5903c4dd8f72b367286"
 similarity = "cosine"
 calibration_device = "cuda:0"
 calibration_summary = "mean_and_population_sd_ddof_0"
-provenance_status = "reconstructed"
-provenance_source = "legacy result details plus immutable official hub snapshot"
-provenance_note = "The model ID and CUDA device are run-attested; the immutable hub revision was added after the legacy run."
+rescore_device = "cuda:0"
+provenance_status = "run-attested-rescore"
+provenance_source = "paper_evaluator_rescore manifests and evaluator_profile.json"
+provenance_note = "The primary paper tables attest the exact immutable revision and CUDA device. The current Common Voice calibration script pins the same checkpoint, but the original ignored calibration artifacts are absent and that execution cannot be independently re-attested from this checkout."
 
 [[evaluators]]
 id = "language_centroid_leakage_proxy"
@@ -147,6 +239,7 @@ revision = "0253049ae131d6a4be1c4f0d8b0ff483a0f8c8e9"
 centroid_file = "src/crosslingual_tts_lab/metrics/fleurs_centroids.json"
 centroid_sha256 = "9adca9f8ef996c21f5f3473359bfc7e3b0d852d19139b0af5049621514373d91"
 similarity = "cosine_source_minus_cosine_target"
-provenance_status = "reconstructed"
-provenance_source = "legacy result details, checked-in centroid artifact, and immutable official hub snapshot"
-provenance_note = "The model ID, centroid values, and CUDA device are run-attested or preserved in the repository; the immutable hub revision was added after the legacy run."
+device = "cuda:0"
+provenance_status = "run-attested-rescore"
+provenance_source = "paper_evaluator_rescore manifests, evaluator_profile.json, and checked-in centroid artifact"
+provenance_note = "The primary paper tables attest the exact immutable encoder revision and CUDA device; the checked-in centroid file is bound by its SHA-256 hash. The original centroid-construction log was not retained, so raw-data split/revision, sample IDs, preprocessing/averaging, and benchmark overlap cannot be reconstructed."
